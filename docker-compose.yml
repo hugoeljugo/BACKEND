@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+
+  db:
+    image: postgres
+    restart: always
+    hostname: postgres
+    container_name: postgres
+    environment:
+      POSTGRES_PASSWORD: root
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+
+  adminer:
+    image: adminer
+    restart: always
+    hostname: adminer
+    container_name: adminer
+    ports:
+      - 8081:8080
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+
+volumes: 
+  postgres:

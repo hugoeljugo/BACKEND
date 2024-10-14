@@ -2,7 +2,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
+import os
+from contextlib import asynccontextmanager
+from fastapi import Depends, FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
@@ -15,71 +17,42 @@ SECRET_KEY = "a9c4d905ad78133bcf5b5faa1ccaef8d3a2446c595719b10a273c02a5a38d065"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-class Hero(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(index=True)
-    age: int | None = Field(default=None, index=True)
-    secret_name: str
+db_user = os.getenv("DB_USER")
+db_pass = os.getenv("DB_PASS")
+db_name = os.getenv("DB_NAME")
+DATABASE_URL = f"postgresql://{db_user}:{db_pass}@localhost:5432/{db_name}"
 
-sqlite_file_name = "database.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
-
-connect_args = {"check_same_thread": False}
-engine = create_engine(sqlite_url, connect_args=connect_args)
+engine = create_engine(DATABASE_URL, echo=True)
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
+    add_initial_data()
 
 
-def get_session():
+def add_initial_data():
+    user1 = User(username="user", password="pass")
+    user2 = User(username="juan", password="alberto")
+    user3 = User(username="maria", password="antonieta")
     with Session(engine) as session:
-        yield session
+        session.add(user1)
+        session.add(user2)
+        session.add(user3)
+        session.commit()
 
 
-SessionDep = Annotated[Session, Depends(get_session)]
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables()
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.on_event("startup")
 def on_startup():
+    print("inicia")
     create_db_and_tables()
 
-
-@app.post("/heroes/")
-def create_hero(hero: Hero, session: SessionDep) -> Hero:
-    session.add(hero)
-    session.commit()
-    session.refresh(hero)
-    return hero
-
-
-@app.get("/heroes/")
-def read_heroes(
-    session: SessionDep,
-    offset: int = 0,
-    limit: Annotated[int, Query(le=100)] = 100,
-) -> list[Hero]:
-    heroes = session.exec(select(Hero).offset(offset).limit(limit)).all()
-    return heroes
-
-
-@app.get("/heroes/{hero_id}")
-def read_hero(hero_id: int, session: SessionDep) -> Hero:
-    hero = session.get(Hero, hero_id)
-    if not hero:
-        raise HTTPException(status_code=404, detail="Hero not found")
-    return hero
-
-
-@app.delete("/heroes/{hero_id}")
-def delete_hero(hero_id: int, session: SessionDep):
-    hero = session.get(Hero, hero_id)
-    if not hero:
-        raise HTTPException(status_code=404, detail="Hero not found")
-    session.delete(hero)
-    session.commit()
-    return {"ok": True}
 
 fake_users_db = {
     "johndoe": {
@@ -91,6 +64,12 @@ fake_users_db = {
     }
 }
 
+class User(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    password: str = Field(index=True)
+    full_name: str | None = Field(default=None)
+    disabled: bool | None = Field(default=False)
 
 class Token(BaseModel):
     access_token: str
@@ -100,16 +79,6 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: str | None = None
 
-
-class User(BaseModel):
-    username: str
-    email: str | None = None
-    full_name: str | None = None
-    disabled: bool | None = None
-
-
-class UserInDB(User):
-    hashed_password: str
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -127,17 +96,20 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 
-def get_user(db, username: str):
-    if username in db:
-        user_dict = db[username]
-        return UserInDB(**user_dict)
-
-
-def authenticate_user(fake_db, username: str, password: str):
-    user = get_user(fake_db, username)
+def get_user(username: str):
+    with Session(engine) as session:
+        statement = select(User).where(User.username == username)
+        user = session.exec(statement).first()
     if not user:
         return False
-    if not verify_password(password, user.hashed_password):
+    return user
+
+
+def authenticate_user(username: str, password: str):
+    user = get_user(username)
+    if not user:
+        return False
+    if not verify_password(password, user.password):
         return False
     return user
 
@@ -167,7 +139,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         token_data = TokenData(username=username)
     except InvalidTokenError:
         raise credentials_exception
-    user = get_user(fake_users_db, username=token_data.username)
+    user = get_user(username=token_data.username)
     if user is None:
         raise credentials_exception
     return user
@@ -181,11 +153,21 @@ async def get_current_active_user(
     return current_user
 
 
+@app.post("/user")
+def create_user(user: User) -> User:
+    with Session(engine) as session:
+        user.password = get_password_hash(user.password)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return user
+
+
 @app.post("/token")
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
-    user = authenticate_user(fake_users_db, form_data.username, form_data.password)
+    user = authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -211,6 +193,10 @@ async def read_own_items(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):
     return [{"item_id": "Foo", "owner": current_user.username}]
+
+@app.get("/test")
+async def test():
+    return "this is a test"
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
