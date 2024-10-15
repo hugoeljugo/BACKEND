@@ -6,6 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -24,35 +25,20 @@ DATABASE_URL = f"postgresql://{db_user}:{db_pass}@localhost:5432/{db_name}"
 
 engine = create_engine(DATABASE_URL, echo=True)
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-    add_initial_data()
+app = FastAPI()
 
+origins = [
+    "http://localhost",
+    "http://localhost:8080",
+]
 
-def add_initial_data():
-    user1 = User(username="user", password="pass")
-    user2 = User(username="juan", password="alberto")
-    user3 = User(username="maria", password="antonieta")
-    with Session(engine) as session:
-        session.add(user1)
-        session.add(user2)
-        session.add(user3)
-        session.commit()
-
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    create_db_and_tables()
-
-app = FastAPI(lifespan=lifespan)
-
-
-@app.on_event("startup")
-def on_startup():
-    print("inicia")
-    create_db_and_tables()
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 fake_users_db = {
     "johndoe": {
@@ -84,9 +70,6 @@ class TokenData(BaseModel):
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-app = FastAPI()
-
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -196,7 +179,7 @@ async def read_own_items(
 
 @app.get("/test")
 async def test():
-    return "this is a test"
+    return {"message": "this is a test"}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
