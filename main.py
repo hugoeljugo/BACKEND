@@ -130,7 +130,7 @@ async def get_current_active_user(
 
 
 @app.post("/user", response_model=UserPublic)
-def create_user(user: UserCreate) -> UserPublic:
+async def create_user(user: UserCreate) -> UserPublic:
     user_db = User.model_validate(user)
     with Session(engine) as session:
         user_db.password = get_password_hash(user_db.password)
