@@ -25,6 +25,15 @@ DATABASE_URL = f"postgresql://{db_user}:{db_pass}@localhost:5432/{db_name}"
 
 engine = create_engine(DATABASE_URL, echo=True)
 
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+def main():
+    create_db_and_tables()
+
+
+
+
 app = FastAPI()
 
 origins = [
@@ -192,3 +201,6 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(f"You wrote: {data}")
     except WebSocketDisconnect:
         pass
+
+if __name__ == "__main__":
+    main()
