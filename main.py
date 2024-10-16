@@ -161,7 +161,7 @@ async def login_for_access_token(
 @app.get("/users/me/", response_model=UserPublic)
 async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
-):
+) -> UserPublic:
     return current_user
 
 
