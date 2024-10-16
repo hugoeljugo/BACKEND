@@ -11,6 +11,7 @@ from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+from users import UserCreate, UserPublic, User
 
 # to get a string like this run:
 # openssl rand -hex 32
@@ -48,23 +49,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-fake_users_db = {
-    "johndoe": {
-        "username": "johndoe",
-        "full_name": "John Doe",
-        "email": "johndoe@example.com",
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        "disabled": False,
-    }
-}
-
-class User(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    username: str = Field(index=True)
-    password: str = Field(index=True)
-    full_name: str | None = Field(default=None)
-    disabled: bool | None = Field(default=False)
 
 class Token(BaseModel):
     access_token: str
@@ -145,14 +129,15 @@ async def get_current_active_user(
     return current_user
 
 
-@app.post("/user")
-def create_user(user: User) -> User:
+@app.post("/user", response_model=UserPublic)
+def create_user(user: UserCreate) -> UserPublic:
+    user_db = User.model_validate(user)
     with Session(engine) as session:
-        user.password = get_password_hash(user.password)
-        session.add(user)
+        user_db.password = get_password_hash(user_db.password)
+        session.add(user_db)
         session.commit()
-        session.refresh(user)
-    return user
+        session.refresh(user_db)
+    return user_db
 
 
 @app.post("/token")
@@ -173,7 +158,7 @@ async def login_for_access_token(
     return Token(access_token=access_token, token_type="bearer")
 
 
-@app.get("/users/me/", response_model=User)
+@app.get("/users/me/", response_model=UserPublic)
 async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):
