@@ -192,20 +192,20 @@ async def create_post(post: PostCreate, session: SessionDep) -> PostPublic:
     return post_db
 
 
-@app.get("/posts/{post_id}", response_model=PostPublic)
-async def get_post(post_id: int, session: SessionDep) -> PostPublic:
-    post = session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    return post
-
-
 @app.get("/posts/me", response_model=list[PostPublic])
 async def get_own_posts(
     current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
 ):
     posts = session.exec(select(Post).where(Post.user_id == current_user.id)).all()
     return posts
+
+
+@app.get("/posts/{post_id}", response_model=PostPublic)
+async def get_post(post_id: int, session: SessionDep) -> PostPublic:
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post
 
 
 @app.get("/users/me/", response_model=UserPublic)
