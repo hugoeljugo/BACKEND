@@ -11,7 +11,8 @@ from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlmodel import Field, Session, SQLModel, create_engine, select
-from users import UserCreate, UserPublic, User
+from users import UserCreate, UserPublic, User, UserUpdate
+from posts import Post, PostPublic, PostCreate, PostUpdate
 
 # to get a string like this run:
 # openssl rand -hex 32
@@ -32,8 +33,12 @@ def create_db_and_tables():
 def main():
     create_db_and_tables()
 
+def get_session():
+    with Session(engine) as session:
+        yield session
 
 
+SessionDep = Annotated[Session, Depends(get_session)]
 
 app = FastAPI()
 
@@ -74,8 +79,7 @@ def get_password_hash(password):
 
 def get_user(username: str):
     with Session(engine) as session:
-        statement = select(User).where(User.username == username)
-        user = session.exec(statement).first()
+        user = session.exec(select(User).where(User.username == username)).first()
     if not user:
         return False
     return user
@@ -129,14 +133,13 @@ async def get_current_active_user(
     return current_user
 
 
-@app.post("/user", response_model=UserPublic)
-async def create_user(user: UserCreate) -> UserPublic:
+@app.post("/users/", response_model=UserPublic)
+async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
-    with Session(engine) as session:
-        user_db.password = get_password_hash(user_db.password)
-        session.add(user_db)
-        session.commit()
-        session.refresh(user_db)
+    user_db.password = get_password_hash(user_db.password)
+    session.add(user_db)
+    session.commit()
+    session.refresh(user_db)
     return user_db
 
 
@@ -156,6 +159,27 @@ async def login_for_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     return Token(access_token=access_token, token_type="bearer")
+
+
+@app.post("/posts/", response_model=PostPublic)
+async def create_post(post: PostCreate, session: SessionDep) -> PostPublic:
+    post_db = Post.model_validate(post)
+    session.add(post_db)
+    session.commit()
+    session.refresh(post_db)
+    return post_db
+
+@app.get("/posts/{post_id}", response_model=PostPublic)
+async def get_post(post_id: int, session: SessionDep) -> PostPublic:
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post
+    
+@app.get("/posts/me", response_model=list[PostPublic])
+async def get_own_posts(current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep):
+    posts = session.exec(select(Post).where(Post.user_id == current_user.id)).all()
+    return posts
 
 
 @app.get("/users/me/", response_model=UserPublic)
