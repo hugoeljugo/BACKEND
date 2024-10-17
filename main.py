@@ -19,8 +19,16 @@ from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlmodel import Field, Session, SQLModel, create_engine, select
-from users import UserCreate, UserPublic, User, UserUpdate
-from posts import Post, PostPublic, PostCreate, PostUpdate
+from models import (
+    User,
+    UserPublic,
+    UserCreate,
+    UserUpdate,
+    Post,
+    PostPublic,
+    PostCreate,
+    PostUpdate,
+)
 
 # to get a string like this run:
 # openssl rand -hex 32
@@ -149,9 +157,7 @@ async def get_current_active_user(
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
     if get_user(user_db.username):
-        raise HTTPException(
-            status_code=409, detail="User already exists"
-        )
+        raise HTTPException(status_code=409, detail="User already exists")
     user_db.password = get_password_hash(user_db.password)
     session.add(user_db)
     session.commit()
