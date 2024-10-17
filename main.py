@@ -4,7 +4,15 @@ from typing import Annotated
 import jwt
 import os
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Query
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    status,
+    WebSocket,
+    WebSocketDisconnect,
+    Query,
+)
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from jwt.exceptions import InvalidTokenError
@@ -27,11 +35,14 @@ DATABASE_URL = f"postgresql://{db_user}:{db_pass}@localhost:5432/{db_name}"
 
 engine = create_engine(DATABASE_URL, echo=True)
 
+
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
 
+
 def main():
     create_db_and_tables()
+
 
 def get_session():
     with Session(engine) as session:
@@ -55,6 +66,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -64,10 +76,10 @@ class TokenData(BaseModel):
     username: str | None = None
 
 
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -136,6 +148,10 @@ async def get_current_active_user(
 @app.post("/users/", response_model=UserPublic)
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
+    if get_user(user_db.username):
+        raise HTTPException(
+            status_code=409, detail="User already exists"
+        )
     user_db.password = get_password_hash(user_db.password)
     session.add(user_db)
     session.commit()
@@ -169,15 +185,19 @@ async def create_post(post: PostCreate, session: SessionDep) -> PostPublic:
     session.refresh(post_db)
     return post_db
 
+
 @app.get("/posts/{post_id}", response_model=PostPublic)
 async def get_post(post_id: int, session: SessionDep) -> PostPublic:
     post = session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     return post
-    
+
+
 @app.get("/posts/me", response_model=list[PostPublic])
-async def get_own_posts(current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep):
+async def get_own_posts(
+    current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
+):
     posts = session.exec(select(Post).where(Post.user_id == current_user.id)).all()
     return posts
 
@@ -195,9 +215,11 @@ async def read_own_items(
 ):
     return [{"item_id": "Foo", "owner": current_user.username}]
 
+
 @app.get("/test")
 async def test():
     return {"message": "this is a test"}
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -210,6 +232,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(f"You wrote: {data}")
     except WebSocketDisconnect:
         pass
+
 
 if __name__ == "__main__":
     main()
