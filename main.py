@@ -178,7 +178,6 @@ async def update_own_user(
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_active_user)],
     file: UploadFile = File(...),
-    
 ):
     image_data = await file.read()
 
@@ -252,14 +251,15 @@ async def read_users_me(
 ) -> UserPublic:
     return current_user
 
+
 @app.get("/users/me/pfp")
-async def get_profile_picture(session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_active_user)]):
+async def get_profile_picture(
+    session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]
+):
     if current_user.pfp is None:
         raise HTTPException(status_code=404, detail="Profile picture not found")
 
     return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
-
 
 
 @app.get("/users/me/items/")
