@@ -88,6 +88,7 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: str | None = None
 
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -95,6 +96,7 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        await self.broadcast(f"Client #{len(self.active_connections)} joined the chat")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
@@ -105,6 +107,7 @@ class ConnectionManager:
     async def broadcast(self, message: str):
         for connection in self.active_connections:
             await connection.send_text(message)
+
 
 manager = ConnectionManager()
 
@@ -306,6 +309,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         await manager.broadcast(f"Client #{client_id} left the chat")
+
 
 if __name__ == "__main__":
     main()
