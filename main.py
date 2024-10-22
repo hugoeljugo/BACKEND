@@ -3,6 +3,7 @@ from typing import Annotated
 
 import jwt
 import os
+import io
 from contextlib import asynccontextmanager
 from fastapi import (
     Depends,
@@ -12,8 +13,11 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
     Query,
+    UploadFile,
+    File,
 )
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
@@ -29,6 +33,7 @@ from models import (
     PostCreate,
     PostUpdate,
 )
+
 
 # to get a string like this run:
 # openssl rand -hex 32
@@ -153,6 +158,39 @@ async def get_current_active_user(
     return current_user
 
 
+@app.patch("/users/me/", response_model=UserPublic)
+async def update_own_user(
+    user: UserUpdate,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> UserPublic:
+    user_db = User.model_validate(user)
+    user_data = user.model_dump(exclude_unset=True)
+    current_user.sqlmodel_update(user_data)
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
+
+@app.patch("/users/me/pfp")
+async def update_own_user(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    file: UploadFile = File(...),
+    
+):
+    image_data = await file.read()
+
+    print(type(image_data))
+    current_user.pfp = image_data
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+
+    return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
+
+
 @app.post("/users/", response_model=UserPublic)
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
@@ -213,6 +251,15 @@ async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UserPublic:
     return current_user
+
+@app.get("/users/me/pfp")
+async def get_profile_picture(session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)]):
+    if current_user.pfp is None:
+        raise HTTPException(status_code=404, detail="Profile picture not found")
+
+    return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
+
 
 
 @app.get("/users/me/items/")
