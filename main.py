@@ -269,6 +269,14 @@ async def get_post(post_id: int, session: SessionDep) -> PostPublic:
         raise HTTPException(status_code=404, detail="Post not found")
     return post
 
+@app.get("/users/{username}/posts", response_model=list[PostPublic])
+async def read_user_posts(username: str, session: SessionDep):
+    user = get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    posts = session.exec(select(Post).where(Post.user_id == user.id)).all()
+    return posts
 
 @app.get("/users/me/", response_model=UserPublic)
 async def read_users_me(
