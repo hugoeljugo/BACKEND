@@ -247,6 +247,7 @@ async def login_for_access_token(
 async def create_post(post: PostCreate, session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]) -> PostPublic:
     post_db = Post.model_validate(post)
     post_db.user_id = current_user.id
+    post_db.date = datetime.now()
     session.add(post_db)
     session.commit()
     session.refresh(post_db)
