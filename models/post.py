@@ -2,7 +2,7 @@ from sqlmodel import Field, SQLModel
 from datetime import datetime
 
 class PostBase(SQLModel):
-    text: str
+    post_body: str
 
 class Post(PostBase, table=True):
     id: int | None = Field(default=None, primary_key=True)

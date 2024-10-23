@@ -244,8 +244,9 @@ async def login_for_access_token(
 
 
 @app.post("/posts/", response_model=PostPublic)
-async def create_post(post: PostCreate, session: SessionDep) -> PostPublic:
+async def create_post(post: PostCreate, session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]) -> PostPublic:
     post_db = Post.model_validate(post)
+    post_db.user_id = current_user.id
     session.add(post_db)
     session.commit()
     session.refresh(post_db)
