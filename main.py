@@ -181,7 +181,7 @@ async def get_current_active_user(
     return current_user
 
 
-@app.patch("/users/me/", response_model=UserPublic)
+@app.patch("/users/me", response_model=UserPublic, tags=["users"])
 async def update_own_user(
     user: UserUpdate,
     session: SessionDep,
@@ -196,8 +196,8 @@ async def update_own_user(
     return current_user
 
 
-@app.patch("/users/me/pfp")
-async def update_own_user(
+@app.patch("/users/me/pfp", tags=["users"])
+async def update_profile_picture(
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_active_user)],
     file: UploadFile = File(...),
@@ -213,7 +213,7 @@ async def update_own_user(
     return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
 
 
-@app.post("/users/", response_model=UserPublic)
+@app.post("/users", response_model=UserPublic, tags=["users"])
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
     if get_user(user_db.username):
@@ -225,7 +225,7 @@ async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     return user_db
 
 
-@app.post("/token")
+@app.post("/token", tags=["users"])
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
@@ -243,7 +243,7 @@ async def login_for_access_token(
     return Token(access_token=access_token, token_type="bearer")
 
 
-@app.post("/posts/", response_model=PostPublic)
+@app.post("/posts", response_model=PostPublic, tags=["posts"])
 async def create_post(post: PostCreate, session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]) -> PostPublic:
     post_db = Post.model_validate(post)
     post_db.user_id = current_user.id
@@ -254,7 +254,7 @@ async def create_post(post: PostCreate, session: SessionDep, current_user: Annot
     return post_db
 
 
-@app.get("/posts/me", response_model=list[PostPublic])
+@app.get("/posts/me", response_model=list[PostPublic], tags=["posts"])
 async def get_own_posts(
     current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
 ):
@@ -262,14 +262,14 @@ async def get_own_posts(
     return posts
 
 
-@app.get("/posts/{post_id}", response_model=PostPublic)
+@app.get("/posts/{post_id}", response_model=PostPublic, tags=["posts"])
 async def get_post(post_id: int, session: SessionDep) -> PostPublic:
     post = session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     return post
 
-@app.get("/users/{username}/posts", response_model=list[PostPublic])
+@app.get("/users/{username}/posts", response_model=list[PostPublic], tags=["users"])
 async def read_user_posts(username: str, session: SessionDep):
     user = get_user(username)
     if not user:
@@ -278,14 +278,14 @@ async def read_user_posts(username: str, session: SessionDep):
     posts = session.exec(select(Post).where(Post.user_id == user.id)).all()
     return posts
 
-@app.get("/users/me/", response_model=UserPublic)
+@app.get("/users/me", response_model=UserPublic, tags=["users"])
 async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UserPublic:
     return current_user
 
 
-@app.get("/users/me/pfp")
+@app.get("/users/me/pfp", tags=["users"])
 async def get_profile_picture(
     session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]
 ):
@@ -295,7 +295,7 @@ async def get_profile_picture(
     return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
 
 
-@app.get("/users/me/items/")
+@app.get("/users/me/items")
 async def read_own_items(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):
