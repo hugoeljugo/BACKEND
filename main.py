@@ -258,7 +258,7 @@ async def create_post(post: PostCreate, session: SessionDep, current_user: Annot
 async def get_own_posts(
     current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
 ):
-    posts = session.exec(select(Post).where(Post.user_id == current_user.id)).all()
+    posts = session.exec(select(Post).where(Post.user_id == current_user.id).order_by(Post.date.desc())).all()
     return posts
 
 
