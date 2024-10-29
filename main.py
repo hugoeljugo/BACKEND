@@ -269,13 +269,24 @@ async def get_post(post_id: int, session: SessionDep) -> PostPublic:
         raise HTTPException(status_code=404, detail="Post not found")
     return post
 
+@app.delete("/posts/{post_id}", response_model=PostPublic, tags=["posts"])
+async def delete_post(post_id: int, session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]) -> PostPublic:
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if not post.user_id == current_user.id:
+        raise HTTPException(status_code=401, detail="You dont have permission to do this")
+    session.delete(post)
+    session.commit()
+    return post
+
 @app.get("/users/{username}/posts", response_model=list[PostPublic], tags=["users"])
 async def read_user_posts(username: str, session: SessionDep):
     user = get_user(username)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    posts = session.exec(select(Post).where(Post.user_id == user.id)).all()
+    posts = session.exec(select(Post).where(Post.user_id == user.id).order_by(Post.date.desc())).all()
     return posts
 
 @app.get("/users/me", response_model=UserPublic, tags=["users"])
