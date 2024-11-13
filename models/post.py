@@ -1,5 +1,7 @@
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, SQLModel, Relationship
 from datetime import datetime
+from .user import UserPublic, User
+from .postuserlink import PostUserLink
 
 class PostBase(SQLModel):
     post_body: str
@@ -8,12 +10,14 @@ class Post(PostBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     date: datetime = Field(default=datetime.now())
-    likes: int = Field(default=0)
+    
+    liked_by: list["User"] | None = Relationship(back_populates="likes", link_model=PostUserLink)
 
 class PostPublic(PostBase):
     id: int
     date: datetime
-    likes: int
+    
+    liked_by: list["UserPublic"]
 
 class PostCreate(PostBase):
     user_id: int
