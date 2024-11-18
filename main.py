@@ -28,6 +28,7 @@ from models import (
     UserPublic,
     UserCreate,
     UserUpdate,
+    UserPublicWithLikesAndFollows,
     Post,
     PostPublic,
     PostCreate,
@@ -292,9 +293,16 @@ async def read_user_posts(username: str, session: SessionDep):
 @app.get("/users/me", response_model=UserPublic, tags=["users"])
 async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> UserPublic:
+) -> UserPublicWithLikesAndFollows:
     return current_user
 
+@app.get("/users/{username}", response_model=UserPublicWithLikesAndFollows, tags=["users"])
+async def read_user(username: str, session: SessionDep):
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return user
 
 @app.get("/users/me/pfp", tags=["users"])
 async def get_profile_picture(
