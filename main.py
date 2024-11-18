@@ -29,6 +29,7 @@ from models import (
     UserCreate,
     UserUpdate,
     UserPublicWithLikesAndFollows,
+    UserLink,
     Post,
     PostPublic,
     PostCreate,
@@ -127,16 +128,15 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 
-def get_user(username: str):
-    with Session(engine) as session:
-        user = session.exec(select(User).where(User.username == username)).first()
+def get_user(username: str, session: Session):
+    user = session.exec(select(User).where(User.username == username)).first()
     if not user:
         return False
     return user
 
 
-def authenticate_user(username: str, password: str):
-    user = get_user(username)
+def authenticate_user(username: str, password: str, session: SessionDep):
+    user = get_user(username, session)
     if not user:
         return False
     if not verify_password(password, user.password):
@@ -155,7 +155,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return encoded_jwt
 
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
+async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -169,7 +169,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         token_data = TokenData(username=username)
     except InvalidTokenError:
         raise credentials_exception
-    user = get_user(username=token_data.username)
+    user = get_user(username=token_data.username, session=session)
     if user is None:
         raise credentials_exception
     return user
@@ -206,7 +206,6 @@ async def update_profile_picture(
 ):
     image_data = await file.read()
 
-    print(type(image_data))
     current_user.pfp = image_data
     session.add(current_user)
     session.commit()
@@ -218,7 +217,7 @@ async def update_profile_picture(
 @app.post("/users", response_model=UserPublic, tags=["users"])
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
-    if get_user(user_db.username):
+    if get_user(user_db.username, session):
         raise HTTPException(status_code=409, detail="User already exists")
     user_db.password = get_password_hash(user_db.password)
     session.add(user_db)
@@ -230,8 +229,9 @@ async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
 @app.post("/token", tags=["users"])
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    session: SessionDep
 ) -> Token:
-    user = authenticate_user(form_data.username, form_data.password)
+    user = authenticate_user(form_data.username, form_data.password, session)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -246,7 +246,11 @@ async def login_for_access_token(
 
 
 @app.post("/posts", response_model=PostPublic, tags=["posts"])
-async def create_post(post: PostCreate, session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]) -> PostPublic:
+async def create_post(
+    post: PostCreate,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> PostPublic:
     post_db = Post.model_validate(post)
     post_db.user_id = current_user.id
     post_db.date = datetime.now()
@@ -260,7 +264,9 @@ async def create_post(post: PostCreate, session: SessionDep, current_user: Annot
 async def get_own_posts(
     current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
 ):
-    posts = session.exec(select(Post).where(Post.user_id == current_user.id).order_by(Post.date.desc())).all()
+    posts = session.exec(
+        select(Post).where(Post.user_id == current_user.id).order_by(Post.date.desc())
+    ).all()
     return posts
 
 
@@ -271,25 +277,36 @@ async def get_post(post_id: int, session: SessionDep) -> PostPublicWithLikes:
         raise HTTPException(status_code=404, detail="Post not found")
     return post
 
+
 @app.delete("/posts/{post_id}", response_model=PostPublic, tags=["posts"])
-async def delete_post(post_id: int, session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]) -> PostPublic:
+async def delete_post(
+    post_id: int,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> PostPublic:
     post = session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     if not post.user_id == current_user.id:
-        raise HTTPException(status_code=401, detail="You dont have permission to do this")
+        raise HTTPException(
+            status_code=401, detail="You dont have permission to do this"
+        )
     session.delete(post)
     session.commit()
     return post
 
+
 @app.get("/users/{username}/posts", response_model=list[PostPublic], tags=["users"])
 async def read_user_posts(username: str, session: SessionDep):
-    user = get_user(username)
+    user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    posts = session.exec(select(Post).where(Post.user_id == user.id).order_by(Post.date.desc())).all()
+    posts = session.exec(
+        select(Post).where(Post.user_id == user.id).order_by(Post.date.desc())
+    ).all()
     return posts
+
 
 @app.get("/users/me", response_model=UserPublic, tags=["users"])
 async def read_users_me(
@@ -297,13 +314,17 @@ async def read_users_me(
 ) -> UserPublicWithLikesAndFollows:
     return current_user
 
-@app.get("/users/{username}", response_model=UserPublicWithLikesAndFollows, tags=["users"])
+
+@app.get(
+    "/users/{username}", response_model=UserPublicWithLikesAndFollows, tags=["users"]
+)
 async def read_user(username: str, session: SessionDep):
-    user = session.exec(select(User).where(User.username == username)).first()
+    user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     return user
+
 
 @app.get("/users/me/pfp", tags=["users"])
 async def get_profile_picture(
@@ -313,6 +334,31 @@ async def get_profile_picture(
         raise HTTPException(status_code=404, detail="Profile picture not found")
 
     return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
+
+@app.post("/follow", response_model=UserLink, tags=["users"])
+async def follow_user(session: SessionDep, follower_id: int, followed_id: int):
+    follower = session.get(User, follower_id)
+    followed = session.get(User, followed_id)
+
+    if not follower:
+        raise HTTPException(status_code=404, detail="Follower not found")
+    if not followed:
+        raise HTTPException(status_code=404, detail="Followed user not found")
+
+    existing_link = session.exec(
+        select(UserLink).where(
+            UserLink.follower_id == follower_id, UserLink.followed_id == followed_id
+        )
+    ).first()
+
+    if existing_link:
+        raise HTTPException(status_code=400, detail="Already following this user")
+
+    user_link = UserLink(follower_id=follower_id, followed_id=followed_id)
+    session.add(user_link)
+    session.commit()
+    session.refresh(user_link)
+    return user_link
 
 
 @app.get("/users/me/items")

@@ -11,7 +11,7 @@ class Post(PostBase, table=True):
     user_id: int = Field(foreign_key="user.id", index=True)
     date: datetime = Field(default=datetime.now())
     
-    liked_by: list["User"] | None = Relationship(back_populates="likes", link_model=PostUserLink)
+    liked_by: list["User"] | None = Relationship(back_populates="likes", link_model=PostUserLink, cascade_delete=True)
 
 class PostPublic(PostBase):
     id: int
