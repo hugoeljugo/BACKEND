@@ -33,6 +33,7 @@ from models import (
     PostPublic,
     PostCreate,
     PostUpdate,
+    PostPublicWithLikes,
 )
 
 
@@ -263,8 +264,8 @@ async def get_own_posts(
     return posts
 
 
-@app.get("/posts/{post_id}", response_model=PostPublic, tags=["posts"])
-async def get_post(post_id: int, session: SessionDep) -> PostPublic:
+@app.get("/posts/{post_id}", response_model=PostPublicWithLikes, tags=["posts"])
+async def get_post(post_id: int, session: SessionDep) -> PostPublicWithLikes:
     post = session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
