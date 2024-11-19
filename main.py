@@ -219,7 +219,9 @@ async def update_profile_picture(
 @app.post("/users", response_model=UserPublic, tags=["users"])
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
-    if get_user(user_db.username, session) or user_db.username == "me":
+    if (not user_db.username) or user_db.username == "me":
+        raise HTTPException(status_code=400, detail="User is not valid")
+    if get_user(user_db.username, session):
         raise HTTPException(status_code=409, detail="User already exists")
     user_db.password = get_password_hash(user_db.password)
     session.add(user_db)
