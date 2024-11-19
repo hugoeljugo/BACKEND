@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Session, SQLModel, create_engine, select, col
 from models import (
     User,
     UserPublic,
@@ -155,7 +155,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return encoded_jwt
 
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep):
+async def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -228,8 +230,7 @@ async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
 
 @app.post("/token", tags=["users"])
 async def login_for_access_token(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    session: SessionDep
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: SessionDep
 ) -> Token:
     user = authenticate_user(form_data.username, form_data.password, session)
     if not user:
@@ -315,14 +316,41 @@ async def read_users_me(
     return current_user
 
 
+def get_user_with_follows(username, session):
+    user = get_user(username, session)
+    if not user:
+        return False
+    user_public = UserPublicWithLikesAndFollows(
+        username=user.username,
+        full_name=user.full_name,
+        likes=user.likes,
+        follows=None,
+        followed_by=None,
+    )
+    user_public.follows = session.exec(
+        select(User).where(
+            col(User.id).in_(
+                select(UserLink.following_id).where(user.id == UserLink.user_id)
+            )
+        )
+    ).all()
+    user_public.followed_by = session.exec(
+        select(User).where(
+            col(User.id).in_(
+                select(UserLink.user_id).where(user.id == UserLink.following_id)
+            )
+        )
+    ).all()
+    return user_public
+
+
 @app.get(
     "/users/{username}", response_model=UserPublicWithLikesAndFollows, tags=["users"]
 )
 async def read_user(username: str, session: SessionDep):
-    user = get_user(username, session)
+    user = get_user_with_follows(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
     return user
 
 
@@ -335,10 +363,11 @@ async def get_profile_picture(
 
     return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
 
+
 @app.post("/follow", response_model=UserLink, tags=["users"])
-async def follow_user(session: SessionDep, follower_id: int, followed_id: int):
-    follower = session.get(User, follower_id)
-    followed = session.get(User, followed_id)
+async def follow_user(session: SessionDep, follower_id: str, followed_id: str):
+    follower = get_user(follower_id, session)
+    followed = get_user(followed_id, session)
 
     if not follower:
         raise HTTPException(status_code=404, detail="Follower not found")
