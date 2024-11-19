@@ -29,6 +29,7 @@ class User(UserBase, table=True):
     likes: list["Post"] = Relationship(
         back_populates="liked_by", link_model=PostUserLink
     )
+    posts: list["Post"] = Relationship()
 
 
 class UserPublic(UserBase):

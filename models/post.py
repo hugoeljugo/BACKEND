@@ -8,7 +8,7 @@ class PostBase(SQLModel):
 
 class Post(PostBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id", index=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     date: datetime = Field(default=datetime.now())
     
     liked_by: list["User"] | None = Relationship(back_populates="likes", link_model=PostUserLink)
@@ -21,7 +21,7 @@ class PostPublicWithLikes(PostPublic):
     liked_by: list["UserPublic"]
 
 class PostCreate(PostBase):
-    user_id: int
+    pass
 
 class PostUpdate(PostBase):
     text: str | None = None

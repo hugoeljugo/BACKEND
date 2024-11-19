@@ -219,7 +219,7 @@ async def update_profile_picture(
 @app.post("/users", response_model=UserPublic, tags=["users"])
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
-    if get_user(user_db.username, session):
+    if get_user(user_db.username, session) or user_db.username == "me":
         raise HTTPException(status_code=409, detail="User already exists")
     user_db.password = get_password_hash(user_db.password)
     session.add(user_db)
@@ -265,10 +265,7 @@ async def create_post(
 async def get_own_posts(
     current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
 ):
-    posts = session.exec(
-        select(Post).where(Post.user_id == current_user.id).order_by(Post.date.desc())
-    ).all()
-    return posts
+    return current_user.posts
 
 
 @app.get("/posts/{post_id}", response_model=PostPublicWithLikes, tags=["posts"])
@@ -302,18 +299,16 @@ async def read_user_posts(username: str, session: SessionDep):
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
-    posts = session.exec(
-        select(Post).where(Post.user_id == user.id).order_by(Post.date.desc())
-    ).all()
-    return posts
+    return user.posts
 
 
-@app.get("/users/me", response_model=UserPublic, tags=["users"])
+@app.get("/users/me", response_model=UserPublicWithLikesAndFollows, tags=["users"])
 async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
+    session: SessionDep
 ) -> UserPublicWithLikesAndFollows:
-    return current_user
+    user = get_user_with_follows(current_user.username, session)
+    return user
 
 
 def get_user_with_follows(username, session):
@@ -324,6 +319,7 @@ def get_user_with_follows(username, session):
         username=user.username,
         full_name=user.full_name,
         likes=user.likes,
+        posts=user.posts,
         follows=None,
         followed_by=None,
     )
@@ -362,6 +358,16 @@ async def get_profile_picture(
         raise HTTPException(status_code=404, detail="Profile picture not found")
 
     return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
+
+@app.get("/users/{username}/pfp", tags=["users"])
+async def get_profile_picture(
+    session: SessionDep, username: str
+):
+    user = get_user(username, session)
+    if user.pfp is None:
+        raise HTTPException(status_code=404, detail="Profile picture not found")
+
+    return StreamingResponse(io.BytesIO(user.pfp), media_type="image/jpeg")
 
 
 @app.post("/follow", response_model=UserLink, tags=["users"])
