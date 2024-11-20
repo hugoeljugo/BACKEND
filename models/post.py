@@ -12,6 +12,7 @@ class Post(PostBase, table=True):
     date: datetime = Field(default=datetime.now())
     
     liked_by: list["User"] | None = Relationship(back_populates="likes", link_model=PostUserLink)
+    user: User | None = Relationship(back_populates="posts")
 
 class PostPublic(PostBase):
     id: int
@@ -19,6 +20,7 @@ class PostPublic(PostBase):
 
 class PostPublicWithLikes(PostPublic):
     liked_by: list["UserPublic"]
+    user: UserPublic
 
 class PostCreate(PostBase):
     pass

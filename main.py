@@ -263,7 +263,7 @@ async def create_post(
     return post_db
 
 
-@app.get("/posts/me", response_model=list[PostPublic], tags=["posts"])
+@app.get("/posts/me", response_model=list[PostPublicWithLikes], tags=["posts"])
 async def get_own_posts(
     current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
 ):
@@ -296,7 +296,7 @@ async def delete_post(
     return post
 
 
-@app.get("/users/{username}/posts", response_model=list[PostPublic], tags=["users"])
+@app.get("/users/{username}/posts", response_model=list[PostPublicWithLikes], tags=["users"])
 async def read_user_posts(username: str, session: SessionDep):
     user = get_user(username, session)
     if not user:
