@@ -17,6 +17,7 @@ class Post(PostBase, table=True):
 class PostPublic(PostBase):
     id: int
     date: datetime
+    user: UserPublic
 
 class PostPublicWithLikes(PostPublic):
     liked_by: list["UserPublic"]

@@ -163,7 +163,7 @@ async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
 ):
     credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
+        status_code=401,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
@@ -357,7 +357,7 @@ async def read_user(username: str, session: SessionDep):
 
 
 @app.get("/users/me/pfp", tags=["users"])
-async def get_profile_picture(
+async def get_own_profile_picture(
     session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]
 ):
     if current_user.pfp is None:
