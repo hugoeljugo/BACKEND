@@ -19,6 +19,7 @@ from fastapi import (
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -64,10 +65,13 @@ def get_session():
     with Session(engine) as session:
         yield session
 
+def custom_generate_unique_id(route: APIRoute):
+    return f"{route.tags[0] if route.tags else ""}-{route.name}"
+
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-app = FastAPI()
+app = FastAPI(generate_unique_id_function=custom_generate_unique_id)
 
 origins = [
     "http://localhost",
