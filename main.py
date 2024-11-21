@@ -76,6 +76,7 @@ app = FastAPI(generate_unique_id_function=custom_generate_unique_id)
 origins = [
     "http://localhost",
     "http://localhost:8080",
+    "http://localhost:5173"
 ]
 
 app.add_middleware(
