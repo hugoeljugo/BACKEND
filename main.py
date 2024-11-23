@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
+from dotenv import load_dotenv
 
 import jwt
 import os
@@ -9,6 +10,7 @@ from fastapi import (
     Depends,
     FastAPI,
     HTTPException,
+    Request,
     status,
     WebSocket,
     WebSocketDisconnect,
@@ -17,7 +19,7 @@ from fastapi import (
     File,
 )
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from jwt.exceptions import InvalidTokenError
@@ -44,6 +46,8 @@ from models import (
 SECRET_KEY = "a9c4d905ad78133bcf5b5faa1ccaef8d3a2446c595719b10a273c02a5a38d065"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+load_dotenv()
 
 db_user = os.getenv("DB_USER")
 db_pass = os.getenv("DB_PASS")
@@ -160,8 +164,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return encoded_jwt
 
 
+
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
+    request: Request, session: SessionDep
 ):
     credentials_exception = HTTPException(
         status_code=401,
@@ -169,6 +174,12 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # Obtener token desde cookies
+        token = request.cookies.get("access_token")
+        if not token:
+            raise credentials_exception
+        # Eliminar prefijo "Bearer"
+        token = token.replace("Bearer ", "")
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
@@ -197,7 +208,7 @@ async def update_own_user(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UserPublic:
     user_db = User.model_validate(user)
-    user_data = user.model_dump(exclude_unset=True)
+    user_data = user_db.model_dump(exclude_unset=True)
     current_user.sqlmodel_update(user_data)
     session.add(current_user)
     session.commit()
@@ -234,11 +245,16 @@ async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     session.refresh(user_db)
     return user_db
 
+@app.post("/logout", tags=["users"])
+async def logout():
+    response = JSONResponse({"message": "Logged out"})
+    response.delete_cookie("access_token")
+    return response
 
 @app.post("/token", tags=["users"])
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: SessionDep
-) -> Token:
+) -> JSONResponse:
     user = authenticate_user(form_data.username, form_data.password, session)
     if not user:
         raise HTTPException(
@@ -250,7 +266,17 @@ async def login_for_access_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return Token(access_token=access_token, token_type="bearer")
+    response = JSONResponse({"message": "Login successful"})
+    # Configurar cookie HttpOnly
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {access_token}",
+        httponly=True,  # Evita acceso desde JavaScript
+        secure=True,  # Solo para HTTPS
+        samesite="Lax",  # Cambiar según necesidad
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    return response
 
 
 @app.post("/posts", response_model=PostPublic, tags=["posts"])
