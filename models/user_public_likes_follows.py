@@ -1,7 +1,7 @@
-from models import PostPublic, UserPublic
+from models import PostPublic, UserPublic, PostPublicWithLikes
 
 class UserPublicWithLikesAndFollows(UserPublic):
-    posts: list["PostPublic"]
-    likes: list["PostPublic"]
+    posts: list["PostPublicWithLikes"]
+    likes: list["PostPublicWithLikes"]
     follows: list["UserPublic"] | None
     followed_by: list["UserPublic"] | None

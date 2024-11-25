@@ -235,15 +235,31 @@ async def update_profile_picture(
 @app.post("/users", response_model=UserPublic, tags=["users"])
 async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     user_db = User.model_validate(user)
-    if (not user_db.username) or user_db.username == "me":
+    if (not user_db.username.strip()) or user_db.username == "me":
         raise HTTPException(status_code=400, detail="User is not valid")
+    if (not user_db.password.strip()):
+        raise HTTPException(status_code=400, detail="Password is not valid")
     if get_user(user_db.username, session):
         raise HTTPException(status_code=409, detail="User already exists")
     user_db.password = get_password_hash(user_db.password)
     session.add(user_db)
     session.commit()
     session.refresh(user_db)
-    return user_db
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user_db.username}, expires_delta=access_token_expires
+    )
+    response = JSONResponse({"message": "Login successful"})
+    # Configurar cookie HttpOnly
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {access_token}",
+        httponly=True,  # Evita acceso desde JavaScript
+        secure=True,  # Solo para HTTPS
+        samesite="Lax",  # Cambiar según necesidad
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    return response
 
 @app.post("/logout", tags=["users"])
 async def logout():
