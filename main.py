@@ -38,6 +38,7 @@ from models import (
     PostCreate,
     PostUpdate,
     PostPublicWithLikes,
+    PostUserLink,
 )
 
 
@@ -420,29 +421,47 @@ async def get_profile_picture(
 
 
 @app.post("/follow", response_model=UserLink, tags=["users"])
-async def follow_user(session: SessionDep, follower_id: str, followed_id: str):
-    follower = get_user(follower_id, session)
-    followed = get_user(followed_id, session)
+async def follow_user(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], followed_username: str):
+    followed = get_user(followed_username, session)
 
-    if not follower:
-        raise HTTPException(status_code=404, detail="Follower not found")
     if not followed:
         raise HTTPException(status_code=404, detail="Followed user not found")
 
     existing_link = session.exec(
         select(UserLink).where(
-            UserLink.follower_id == follower_id, UserLink.followed_id == followed_id
+            UserLink.follower_id == current_user.id, UserLink.followed_id == followed.id
         )
     ).first()
 
     if existing_link:
         raise HTTPException(status_code=400, detail="Already following this user")
 
-    user_link = UserLink(follower_id=follower_id, followed_id=followed_id)
+    user_link = UserLink(follower_id=current_user.id, followed_id=followed.id)
     session.add(user_link)
     session.commit()
     session.refresh(user_link)
-    return user_link
+    return JSONResponse({"message": f"User {current_user.username} followed {followed.username} successfully."})
+
+@app.post("/like")
+async def like_post(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], post_id: int):
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    existing_link = session.exec(
+        select(PostUserLink).where(
+            PostUserLink.user_id == current_user.id, PostUserLink.post_id == post.id
+        )
+    ).first()
+
+    if existing_link:
+        raise HTTPException(status_code=400, detail="Already liking this post")
+
+    post_user_link = PostUserLink(user_id=current_user.id,post_id=post.id)
+    session.add(post_user_link)
+    session.commit()
+    session.refresh(post_user_link)
+    return JSONResponse({"message": f"User {current_user.username} liked the post {post.id} successfully."})
 
 
 @app.get("/users/me/items")

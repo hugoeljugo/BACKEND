@@ -3,6 +3,7 @@ from .post import PostPublic
 from .post import PostCreate
 from .post import PostUpdate
 from .post import PostPublicWithLikes
+from .postuserlink import PostUserLink
 from .user import User
 from .user import UserUpdate
 from .user import UserCreate
