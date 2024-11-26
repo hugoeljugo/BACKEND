@@ -420,7 +420,7 @@ async def get_profile_picture(
     return StreamingResponse(io.BytesIO(user.pfp), media_type="image/jpeg")
 
 
-@app.post("/follow", response_model=UserLink, tags=["users"])
+@app.post("/follow", tags=["users"])
 async def follow_user(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], followed_username: str):
     followed = get_user(followed_username, session)
 
@@ -442,7 +442,7 @@ async def follow_user(session: SessionDep, current_user: Annotated[User, Depends
     session.refresh(user_link)
     return JSONResponse({"message": f"User {current_user.username} followed {followed.username} successfully."})
 
-@app.post("/like")
+@app.post("/like", tags=["posts"])
 async def like_post(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], post_id: int):
     post = session.get(Post, post_id)
     if not post:
@@ -463,17 +463,24 @@ async def like_post(session: SessionDep, current_user: Annotated[User, Depends(g
     session.refresh(post_user_link)
     return JSONResponse({"message": f"User {current_user.username} liked the post {post.id} successfully."})
 
+@app.delete("/like", tags=["posts"])
+async def unlike_post(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], post_id: int):
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    existing_link = session.exec(
+        select(PostUserLink).where(
+            PostUserLink.user_id == current_user.id, PostUserLink.post_id == post.id
+        )
+    ).first()
 
-@app.get("/users/me/items")
-async def read_own_items(
-    current_user: Annotated[User, Depends(get_current_active_user)],
-):
-    return [{"item_id": "Foo", "owner": current_user.username}]
+    if not existing_link:
+        raise HTTPException(status_code=400, detail="Not liking this post")
 
-
-@app.get("/test")
-async def test():
-    return {"message": "this is a test"}
+    session.delete(existing_link)
+    session.commit()
+    return JSONResponse({"message": f"User {current_user.username} unliked the post {post.id} successfully."})
 
 
 @app.websocket("/ws")
