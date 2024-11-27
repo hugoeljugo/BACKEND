@@ -429,6 +429,11 @@ async def get_profile_picture(
 
     return StreamingResponse(io.BytesIO(user.pfp), media_type="image/jpeg")
 
+@app.delete("/users", tags=["users"])
+async def delete_user_me(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]):
+    session.delete(current_user)
+    session.commit()
+    return JSONResponse({"message": f"User {current_user.username} deleted successfully."})
 
 @app.post("/follow", tags=["users"])
 async def follow_user(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], followed_username: str):
@@ -451,6 +456,26 @@ async def follow_user(session: SessionDep, current_user: Annotated[User, Depends
     session.commit()
     session.refresh(user_link)
     return JSONResponse({"message": f"User {current_user.username} followed {followed.username} successfully."})
+
+@app.delete("/follow", tags=["users"])
+async def unfollow__user(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], unfollowed_username: str):
+    unfollowed = get_user(unfollowed_username, session)
+
+    if not unfollowed:
+        raise HTTPException(status_code=404, detail="Unfollowed user not found")
+    
+    existing_link = session.exec(
+        select(UserLink).where(
+            UserLink.user_id == current_user.id, UserLink.following_id == unfollowed.id
+        )
+    ).first()
+
+    if not existing_link:
+        raise HTTPException(status_code=400, detail="Not following this user")
+    
+    session.delete(existing_link)
+    session.commit()
+    return JSONResponse({"message": f"User {current_user.username} unfollowed the user {unfollowed.username} successfully."})
 
 @app.post("/like", tags=["posts"])
 async def like_post(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], post_id: int):
