@@ -142,6 +142,9 @@ def get_user(username: str, session: Session):
     user = session.exec(select(User).where(User.username == username)).first()
     if not user:
         return False
+
+    user.posts.sort(key=lambda post: post.date, reverse=True)
+    user.likes.sort(key=lambda post: post.date, reverse=True)
     return user
 
 
@@ -250,7 +253,7 @@ async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     access_token = create_access_token(
         data={"sub": user_db.username}, expires_delta=access_token_expires
     )
-    response = JSONResponse({"message": "Login successful"})
+    response = JSONResponse({"message": f"User {user.username} created successfully"})
     # Configurar cookie HttpOnly
     response.set_cookie(
         key="access_token",
@@ -436,14 +439,14 @@ async def follow_user(session: SessionDep, current_user: Annotated[User, Depends
 
     existing_link = session.exec(
         select(UserLink).where(
-            UserLink.follower_id == current_user.id, UserLink.followed_id == followed.id
+            UserLink.user_id == current_user.id, UserLink.following_id == followed.id
         )
     ).first()
 
     if existing_link:
         raise HTTPException(status_code=400, detail="Already following this user")
 
-    user_link = UserLink(follower_id=current_user.id, followed_id=followed.id)
+    user_link = UserLink(user_id=current_user.id, following_id=followed.id)
     session.add(user_link)
     session.commit()
     session.refresh(user_link)

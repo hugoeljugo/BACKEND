@@ -1,17 +1,23 @@
 from sqlmodel import Field, SQLModel, Relationship
 from .postuserlink import PostUserLink
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).parent.parent
+PFP = ROOT_DIR / 'default_pfp.png'
 
 
 class UserLink(SQLModel, table=True):
     user_id: int = Field(
         default=None, 
         foreign_key="user.id", 
-        primary_key=True
+        primary_key=True, 
+        ondelete="CASCADE"
     )
     following_id: int  = Field(
         default=None, 
         foreign_key="user.id", 
-        primary_key=True
+        primary_key=True, 
+        ondelete="CASCADE"
     )
 
 
@@ -23,7 +29,7 @@ class UserBase(SQLModel):
 class User(UserBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     password: str = Field(index=True)
-    pfp: bytes | None = Field(default=None)
+    pfp: bytes | None = Field(default=PFP.read_bytes())
     disabled: bool | None = Field(default=False)
 
     likes: list["Post"] = Relationship(
