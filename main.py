@@ -345,15 +345,22 @@ async def delete_post(
 
 
 @app.get("/users/{username}/posts", response_model=list[PostPublicWithLikes], tags=["users"])
-async def read_user_posts(username: str, session: SessionDep):
+async def get_user_posts(username: str, session: SessionDep):
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user.posts
 
+@app.get("/users/{username}/likes", response_model=list[PostPublicWithLikes], tags=["users"])
+async def get_user_likes(username: str, session: SessionDep):
+    user = get_user(username, session)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user.likes
+
 
 @app.get("/users/me", response_model=UserPublicWithLikesAndFollows, tags=["users"])
-async def read_users_me(
+async def get_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
     session: SessionDep
 ) -> UserPublicWithLikesAndFollows:
@@ -393,7 +400,7 @@ def get_user_with_follows(username, session):
 @app.get(
     "/users/{username}", response_model=UserPublicWithLikesAndFollows, tags=["users"]
 )
-async def read_user(username: str, session: SessionDep):
+async def get_user_by_username(username: str, session: SessionDep):
     user = get_user_with_follows(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
