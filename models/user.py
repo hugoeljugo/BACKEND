@@ -29,7 +29,7 @@ class UserBase(SQLModel):
 class User(UserBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     password: str = Field(index=True)
-    pfp: bytes | None = Field(default=PFP.read_bytes())
+    pfp: str | None = Field(default='default_pfp.png' )
     disabled: bool | None = Field(default=False)
 
     likes: list["Post"] = Relationship(
@@ -39,7 +39,7 @@ class User(UserBase, table=True):
 
 
 class UserPublic(UserBase):
-    pass
+    pfp: str
 
 
 class UserCreate(UserBase):

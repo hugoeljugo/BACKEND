@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from dotenv import load_dotenv
 
+from uuid import uuid4
+import shutil
 import jwt
 import os
 import io
@@ -49,6 +51,10 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 load_dotenv()
+
+
+UPLOAD_FOLDER = 'uploaded_files'  # Ruta para guardar las imágenes
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 db_user = os.getenv("DB_USER")
 db_pass = os.getenv("DB_PASS")
@@ -224,11 +230,16 @@ async def update_own_user(
 async def update_profile_picture(
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_active_user)],
-    file: UploadFile = File(...),
+    pfp: UploadFile = File(...),
 ):
-    image_data = await file.read()
+    file_extension = pfp.filename.split('.')[-1]
+    file_name = f"{uuid4()}.{file_extension}"
+    file_path = os.path.join(UPLOAD_FOLDER, file_name)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(pfp.file, buffer)
 
-    current_user.pfp = image_data
+    current_user.pfp = file_name
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
@@ -380,6 +391,7 @@ def get_user_with_follows(username, session):
         full_name=user.full_name,
         likes=user.likes,
         posts=user.posts,
+        pfp=user.pfp,
         follows=None,
         followed_by=None,
     )
@@ -516,6 +528,14 @@ async def unlike_post(session: SessionDep, current_user: Annotated[User, Depends
     session.delete(existing_link)
     session.commit()
     return JSONResponse({"message": f"User {current_user.username} unliked the post {post.id} successfully."})
+
+@app.get("/files/{file_name}")
+async def get_file(file_name: str):
+    file_path = os.path.join(UPLOAD_FOLDER, file_name)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    else:
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 @app.websocket("/ws")
