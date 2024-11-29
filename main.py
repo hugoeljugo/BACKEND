@@ -3,6 +3,7 @@ from typing import Annotated
 from dotenv import load_dotenv
 
 from uuid import uuid4
+from PIL import Image
 import shutil
 import jwt
 import os
@@ -41,6 +42,8 @@ from models import (
     PostUpdate,
     PostPublicWithLikes,
     PostUserLink,
+    BasicResponse,
+    BasicFileResponse
 )
 
 
@@ -53,7 +56,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 load_dotenv()
 
 
-UPLOAD_FOLDER = 'uploaded_files'  # Ruta para guardar las imágenes
+UPLOAD_FOLDER = "uploaded_files"  # Ruta para guardar las imágenes
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 db_user = os.getenv("DB_USER")
@@ -76,6 +79,7 @@ def get_session():
     with Session(engine) as session:
         yield session
 
+
 def custom_generate_unique_id(route: APIRoute):
     return f"{route.tags[0] if route.tags else ""}-{route.name}"
 
@@ -84,11 +88,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 
 app = FastAPI(generate_unique_id_function=custom_generate_unique_id)
 
-origins = [
-    "http://localhost",
-    "http://localhost:8080",
-    "http://localhost:5173"
-]
+origins = ["http://localhost", "http://localhost:8080", "http://localhost:5173"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -174,10 +174,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return encoded_jwt
 
 
-
-async def get_current_user(
-    request: Request, session: SessionDep
-):
+async def get_current_user(request: Request, session: SessionDep):
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials",
@@ -226,33 +223,47 @@ async def update_own_user(
     return current_user
 
 
-@app.patch("/users/me/pfp", tags=["users"])
+@app.patch("/users/me/pfp", response_model=BasicFileResponse, tags=["users"])
 async def update_profile_picture(
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_active_user)],
     pfp: UploadFile = File(...),
 ):
-    file_extension = pfp.filename.split('.')[-1]
-    file_name = f"{uuid4()}.{file_extension}"
-    file_path = os.path.join(UPLOAD_FOLDER, file_name)
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(pfp.file, buffer)
+    # Validar el formato de la imagen
+    file_extension = pfp.filename.split(".")[-1].lower()
+    if file_extension not in ["jpg", "jpeg", "png", "webp"]:
+        raise HTTPException(status_code=400, detail="Unsupported image format")
 
+    # Cargar la imagen usando PIL
+    image = Image.open(pfp.file)
+
+    # Redimensionar la imagen al tamaño fijo (ejemplo: 256x256 píxeles)
+    fixed_size = (256, 256)
+    image = image.resize(fixed_size, Image.Resampling.LANCZOS)
+
+    # Convertir a JPEG para reducir el tamaño (si no es ya JPEG)
+    file_name = f"{uuid4()}.jpeg"
+    file_path = os.path.join(UPLOAD_FOLDER, file_name)
+
+    # Guardar la imagen procesada en el disco
+    image.save(file_path, format="JPEG", quality=85)  # Ajustar calidad si es necesario
+
+    # Actualizar la referencia del usuario en la base de datos
     current_user.pfp = file_name
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
 
-    return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
+    # Devolver una respuesta JSON
+    return JSONResponse({"message": "Profile picture updated successfully", "file_name": file_name})
 
 
-@app.post("/users", response_model=UserPublic, tags=["users"])
-async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
+@app.post("/users", response_model=BasicResponse, tags=["users"])
+async def create_user(user: UserCreate, session: SessionDep) -> BasicResponse:
     user_db = User.model_validate(user)
     if (not user_db.username.strip()) or user_db.username == "me":
         raise HTTPException(status_code=400, detail="User is not valid")
-    if (not user_db.password.strip()):
+    if not user_db.password.strip():
         raise HTTPException(status_code=400, detail="Password is not valid")
     if get_user(user_db.username, session):
         raise HTTPException(status_code=409, detail="User already exists")
@@ -276,13 +287,15 @@ async def create_user(user: UserCreate, session: SessionDep) -> UserPublic:
     )
     return response
 
-@app.post("/logout", tags=["users"])
+
+@app.post("/logout", response_model=BasicResponse, tags=["users"])
 async def logout():
     response = JSONResponse({"message": "Logged out"})
     response.delete_cookie("access_token")
     return response
 
-@app.post("/token", tags=["users"])
+
+@app.post("/token", response_model=BasicResponse, tags=["users"])
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: SessionDep
 ) -> JSONResponse:
@@ -358,14 +371,19 @@ async def delete_post(
     return post
 
 
-@app.get("/users/{username}/posts", response_model=list[PostPublicWithLikes], tags=["users"])
+@app.get(
+    "/users/{username}/posts", response_model=list[PostPublicWithLikes], tags=["users"]
+)
 async def get_user_posts(username: str, session: SessionDep):
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user.posts
 
-@app.get("/users/{username}/likes", response_model=list[PostPublicWithLikes], tags=["users"])
+
+@app.get(
+    "/users/{username}/likes", response_model=list[PostPublicWithLikes], tags=["users"]
+)
 async def get_user_likes(username: str, session: SessionDep):
     user = get_user(username, session)
     if not user:
@@ -375,8 +393,7 @@ async def get_user_likes(username: str, session: SessionDep):
 
 @app.get("/users/me", response_model=UserPublicWithLikesAndFollows, tags=["users"])
 async def get_users_me(
-    current_user: Annotated[User, Depends(get_current_active_user)],
-    session: SessionDep
+    current_user: Annotated[User, Depends(get_current_active_user)], session: SessionDep
 ) -> UserPublicWithLikesAndFollows:
     user = get_user_with_follows(current_user.username, session)
     return user
@@ -422,33 +439,23 @@ async def get_user_by_username(username: str, session: SessionDep):
     return user
 
 
-@app.get("/users/me/pfp", tags=["users"])
-async def get_own_profile_picture(
+@app.delete("/users", response_model=BasicResponse, tags=["users"])
+async def delete_user_me(
     session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]
 ):
-    if current_user.pfp is None:
-        raise HTTPException(status_code=404, detail="Profile picture not found")
-
-    return StreamingResponse(io.BytesIO(current_user.pfp), media_type="image/jpeg")
-
-@app.get("/users/{username}/pfp", tags=["users"])
-async def get_profile_picture(
-    session: SessionDep, username: str
-):
-    user = get_user(username, session)
-    if user.pfp is None:
-        raise HTTPException(status_code=404, detail="Profile picture not found")
-
-    return StreamingResponse(io.BytesIO(user.pfp), media_type="image/jpeg")
-
-@app.delete("/users", tags=["users"])
-async def delete_user_me(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]):
     session.delete(current_user)
     session.commit()
-    return JSONResponse({"message": f"User {current_user.username} deleted successfully."})
+    return JSONResponse(
+        {"message": f"User {current_user.username} deleted successfully."}
+    )
 
-@app.post("/follow", tags=["users"])
-async def follow_user(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], followed_username: str):
+
+@app.post("/follow", response_model=BasicResponse, tags=["users"])
+async def follow_user(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    followed_username: str,
+):
     followed = get_user(followed_username, session)
 
     if not followed:
@@ -467,15 +474,24 @@ async def follow_user(session: SessionDep, current_user: Annotated[User, Depends
     session.add(user_link)
     session.commit()
     session.refresh(user_link)
-    return JSONResponse({"message": f"User {current_user.username} followed {followed.username} successfully."})
+    return JSONResponse(
+        {
+            "message": f"User {current_user.username} followed {followed.username} successfully."
+        }
+    )
 
-@app.delete("/follow", tags=["users"])
-async def unfollow__user(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], unfollowed_username: str):
+
+@app.delete("/follow", response_model=BasicResponse, tags=["users"])
+async def unfollow__user(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    unfollowed_username: str,
+):
     unfollowed = get_user(unfollowed_username, session)
 
     if not unfollowed:
         raise HTTPException(status_code=404, detail="Unfollowed user not found")
-    
+
     existing_link = session.exec(
         select(UserLink).where(
             UserLink.user_id == current_user.id, UserLink.following_id == unfollowed.id
@@ -484,17 +500,26 @@ async def unfollow__user(session: SessionDep, current_user: Annotated[User, Depe
 
     if not existing_link:
         raise HTTPException(status_code=400, detail="Not following this user")
-    
+
     session.delete(existing_link)
     session.commit()
-    return JSONResponse({"message": f"User {current_user.username} unfollowed the user {unfollowed.username} successfully."})
+    return JSONResponse(
+        {
+            "message": f"User {current_user.username} unfollowed the user {unfollowed.username} successfully."
+        }
+    )
 
-@app.post("/like", tags=["posts"])
-async def like_post(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], post_id: int):
+
+@app.post("/like", response_model=BasicResponse, tags=["posts"])
+async def like_post(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    post_id: int,
+):
     post = session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    
+
     existing_link = session.exec(
         select(PostUserLink).where(
             PostUserLink.user_id == current_user.id, PostUserLink.post_id == post.id
@@ -504,18 +529,27 @@ async def like_post(session: SessionDep, current_user: Annotated[User, Depends(g
     if existing_link:
         raise HTTPException(status_code=400, detail="Already liking this post")
 
-    post_user_link = PostUserLink(user_id=current_user.id,post_id=post.id)
+    post_user_link = PostUserLink(user_id=current_user.id, post_id=post.id)
     session.add(post_user_link)
     session.commit()
     session.refresh(post_user_link)
-    return JSONResponse({"message": f"User {current_user.username} liked the post {post.id} successfully."})
+    return JSONResponse(
+        {
+            "message": f"User {current_user.username} liked the post {post.id} successfully."
+        }
+    )
 
-@app.delete("/like", tags=["posts"])
-async def unlike_post(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], post_id: int):
+
+@app.delete("/like", response_model=BasicResponse, tags=["posts"])
+async def unlike_post(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    post_id: int,
+):
     post = session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    
+
     existing_link = session.exec(
         select(PostUserLink).where(
             PostUserLink.user_id == current_user.id, PostUserLink.post_id == post.id
@@ -527,9 +561,14 @@ async def unlike_post(session: SessionDep, current_user: Annotated[User, Depends
 
     session.delete(existing_link)
     session.commit()
-    return JSONResponse({"message": f"User {current_user.username} unliked the post {post.id} successfully."})
+    return JSONResponse(
+        {
+            "message": f"User {current_user.username} unliked the post {post.id} successfully."
+        }
+    )
 
-@app.get("/files/{file_name}")
+
+@app.get("/files/{file_name}", response_model=bytes)
 async def get_file(file_name: str):
     file_path = os.path.join(UPLOAD_FOLDER, file_name)
     if os.path.exists(file_path):

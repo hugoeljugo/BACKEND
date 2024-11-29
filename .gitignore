@@ -1,3 +1,4 @@
 *.env
 *.venv
 *.yml
+/uploaded_files/*
