@@ -1,5 +1,5 @@
 from sqlmodel import Field, SQLModel, Relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from .user import UserPublic, User
 from .postuserlink import PostUserLink
 
@@ -9,7 +9,7 @@ class PostBase(SQLModel):
 class Post(PostBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int | None = Field(default=None, foreign_key="user.id", index=True, ondelete="CASCADE")
-    date: datetime = Field(default=datetime.now())
+    date: datetime = Field(default=datetime.now(timezone.utc))
     
     liked_by: list["User"] | None = Relationship(back_populates="likes", link_model=PostUserLink)
     user: User | None = Relationship(back_populates="posts")

@@ -31,6 +31,7 @@ class User(UserBase, table=True):
     password: str = Field(index=True)
     pfp: str | None = Field(default='default_pfp.png' )
     disabled: bool | None = Field(default=False)
+    is_admin: bool = Field(default=False)
 
     likes: list["Post"] = Relationship(
         back_populates="liked_by", link_model=PostUserLink
