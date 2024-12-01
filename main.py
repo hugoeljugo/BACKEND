@@ -242,11 +242,11 @@ async def update_profile_picture(
     image = image.resize(fixed_size, Image.Resampling.LANCZOS)
 
     # Convertir a JPEG para reducir el tamaño (si no es ya JPEG)
-    file_name = f"{uuid4()}.jpeg"
+    file_name = f"{uuid4()}.webp"
     file_path = os.path.join(UPLOAD_FOLDER, file_name)
 
     # Guardar la imagen procesada en el disco
-    image.save(file_path, format="JPEG", quality=85)  # Ajustar calidad si es necesario
+    image.save(file_path, format="WEBP", quality=85)  # Ajustar calidad si es necesario
 
     # Actualizar la referencia del usuario en la base de datos
     current_user.pfp = file_name
