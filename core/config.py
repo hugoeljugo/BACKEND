@@ -59,7 +59,7 @@ SOFTWARE.""",
     }
 
     # CORS
-    CORS_ALLOWED_ORIGINS: list[str] = ["*"]
+    CORS_ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost"]
 
     # Database
     DB_USER: str

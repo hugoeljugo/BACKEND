@@ -99,6 +99,7 @@ app = FastAPI(
     openapi_tags=settings.OPENAPI_TAGS,
     contact=settings.CONTACT,
     license_info=settings.LICENSE_INFO,
+    generate_unique_id_function=custom_generate_unique_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -323,7 +324,7 @@ async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     session: SessionDep,
     _: Annotated[
-        None, Depends(lambda: rate_limit("login", settings.LOGIN_ATTEMPTS_PER_MINUTE))
+        None, Depends(lambda: rate_limit("login", settings.LOGIN_ATTEMPTS_PER_MINUTE).__await__)
     ],
 ) -> JSONResponse:
     """
@@ -332,36 +333,29 @@ async def login_for_access_token(
     Rate limited to prevent brute force attacks.
     Returns a JWT token in an HTTP-only cookie.
     """
-    try:
-        user = authenticate_user(form_data.username, form_data.password, session)
-        if not user:
-            logger.warning(f"Failed login attempt for user: {form_data.username}")
-            raise HTTPException(
-                status_code=401,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+    user = authenticate_user(form_data.username, form_data.password, session)
+    if not user:
+        logger.warning(f"Failed login attempt for user: {form_data.username}")
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-
-        logger.info(f"Successful login for user: {user.username}")
-        response = JSONResponse({"message": "Login successful"})
-        response.set_cookie(
-            key="access_token",
-            value=f"Bearer {access_token}",
-            httponly=True,
-            secure=True,
-            samesite="Lax",
-            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        )
-        return response
-
-    except Exception as e:
-        logger.error(f"Login error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    logger.info(f"Successful login for user: {user.username}")
+    response = JSONResponse({"message": "Login successful"})
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {access_token}",
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    return response
 
 
 @app.post("/logout", response_model=BasicResponse, tags=["auth"])
@@ -692,6 +686,35 @@ async def like_post(
         }
     )
 
+@app.delete("/like", response_model=BasicResponse, tags=["social"])
+async def delete_like_post(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    post_id: int,
+):
+    """
+    Delete a like from a post.
+    """
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    existing_link = session.exec(
+        select(PostUserLink).where(
+            PostUserLink.user_id == current_user.id, PostUserLink.post_id == post.id
+        )
+    ).first()
+
+    if not existing_link:
+        raise HTTPException(status_code=400, detail="Not liking this post")
+
+    session.delete(existing_link)
+    session.commit()
+    return JSONResponse(
+        {
+            "message": f"User {current_user.username} doesnt like the post {post.id} any longer."
+        }
+    )
 
 # ============= User Profile Endpoints =============
 
