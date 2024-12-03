@@ -103,6 +103,15 @@ SOFTWARE.""",
     # API Key
     API_KEY: str
     API_KEY_NAME: str = "X-API-Key"
+    
+    # Email Settings
+    SMTP_HOST: str = "maildev"
+    SMTP_PORT: int = 1025
+    SMTP_USER: str
+    SMTP_PASSWORD: str
+    EMAIL_FROM_NAME: str = "MeowApp"
+    EMAIL_FROM_ADDRESS: str
+    VERIFICATION_CODE_EXPIRE_MINUTES: int = 30
 
     class Config:
         env_file = ".env"

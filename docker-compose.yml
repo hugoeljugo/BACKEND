@@ -34,6 +34,15 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: db
 
+  maildev:
+    image: maildev/maildev
+    restart: always
+    hostname: maildev
+    container_name: maildev
+    ports:
+      - 1080:1080  # Web interface
+      - 1025:1025  # SMTP server
+
 volumes: 
   postgres:
   redis:

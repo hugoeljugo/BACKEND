@@ -6,6 +6,8 @@ import asyncio
 import logging
 import os
 
+from services.email import generate_verification_code, send_verification_email
+from services.two_factor import TwoFactorService
 from cache import cache_response
 from core.tasks import clean_old_files
 from fastapi import (
@@ -55,6 +57,7 @@ from models import (
     PostUserLink,
     BasicResponse,
     BasicFileResponse,
+    TwoFactorSetupResponse,
     Log,
 )
 
@@ -376,14 +379,9 @@ async def logout():
 # ============= User Management Endpoints =============
 
 
-@app.post("/users", response_model=BasicResponse, tags=["users"])
-async def create_user(user: UserCreate, session: SessionDep) -> BasicResponse:
-    """
-    Create a new user account.
-
-    Validates username and password, checks for duplicates,
-    and sets up initial authentication.
-    """
+@app.post("/users", response_model=UserPublic, tags=["users"])
+async def create_user(user: UserCreate, session: SessionDep) -> User:
+    """Create a new user account"""
     user_db = User.model_validate(user)
     if (not user_db.username.strip()) or user_db.username == "me":
         raise HTTPException(status_code=400, detail="User is not valid")
@@ -392,24 +390,29 @@ async def create_user(user: UserCreate, session: SessionDep) -> BasicResponse:
     if get_user(user_db.username, session):
         raise HTTPException(status_code=409, detail="User already exists")
     user_db.password = get_password_hash(user_db.password)
-    session.add(user_db)
+    verification_code = generate_verification_code()
+    expires = datetime.now(timezone.utc) + \
+        timedelta(minutes=settings.VERIFICATION_CODE_EXPIRE_MINUTES)
+    
+    db_user = User(
+        username=user_db.username,
+        full_name=user_db.full_name,
+        email=user_db.email,
+        password=get_password_hash(user_db.password),
+        verification_code=verification_code,
+        verification_code_expires=expires
+    )
+    
+    session.add(db_user)
     session.commit()
-    session.refresh(user_db)
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user_db.username}, expires_delta=access_token_expires
-    )
-    response = JSONResponse({"message": f"User {user.username} created successfully"})
-    # Configurar cookie HttpOnly
-    response.set_cookie(
-        key="access_token",
-        value=f"Bearer {access_token}",
-        httponly=True,  # Evita acceso desde JavaScript
-        secure=True,  # Solo para HTTPS
-        samesite="Lax",  # Cambiar según necesidad
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    )
-    return response
+    session.refresh(db_user)
+    
+    if send_verification_email(user_db.email, verification_code):
+        return db_user
+    else:
+        session.delete(db_user)
+        session.commit()
+        raise HTTPException(status_code=500, detail="Failed to send verification email")
 
 
 @app.get("/users/me", response_model=UserPublicWithLikesAndFollows, tags=["users"])
@@ -514,7 +517,7 @@ async def update_profile_picture(
     "/posts",
     response_model=PostPublic,
     tags=["posts"],
-    dependencies=[Depends(lambda: rate_limit("posts", settings.POSTS_PER_MINUTE))],
+    dependencies=[Depends(lambda: rate_limit("posts", settings.POSTS_PER_MINUTE).__await__)],
 )
 async def create_post(
     post: PostCreate,
@@ -797,7 +800,7 @@ def get_user_with_follows(username, session):
     return user_public
 
 
-@app.get("/files/{file_name}", response_model=bytes)
+@app.get("/files/{file_name}", response_model=bytes, tags=["files"])
 async def get_file(file_name: str):
     file_path = os.path.join(settings.UPLOAD_FOLDER, file_name)
     if os.path.exists(file_path):
@@ -823,7 +826,7 @@ async def websocket_endpoint(websocket: WebSocket):
 api_key_header = APIKeyHeader(name=settings.API_KEY_NAME, auto_error=False)
 
 
-@app.post("/api/logs", response_model=Log)
+@app.post("/api/logs", response_model=Log, tags=["logs"])
 async def create_log(
     request: Request,
     log: Log,
@@ -870,7 +873,7 @@ async def get_logs(
     return session.exec(query).all()
 
 
-@app.get("/posts/feed", response_model=list[PostPublicWithLikes])
+@app.get("/posts/feed", response_model=list[PostPublicWithLikes], tags=["posts"])
 @cache_response(settings.CACHE_EXPIRE_TIME)
 async def get_posts_feed(
     session: SessionDep,
@@ -890,7 +893,7 @@ async def get_posts_feed(
         raise HTTPException(status_code=500, detail="Error fetching feed")
 
 
-@app.post("/admin/cache/clear")
+@app.post("/admin/cache/clear", tags=["admin"])
 async def clear_cache(current_user: AdminUser):
     try:
         redis_client = redis.from_url(settings.REDIS_URL)
@@ -910,6 +913,122 @@ async def setup_periodic_tasks():
             await asyncio.sleep(86400)  # Wait 24 hours
 
     asyncio.create_task(cleanup_task())
+
+
+@app.post("/users/verify-email", response_model=BasicResponse, tags=["auth"])
+async def verify_email(
+    verification_code: str,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)]
+) -> JSONResponse:
+    """Verify user's email with the provided code"""
+    if current_user.email_verified:
+        raise HTTPException(status_code=400, detail="Email already verified")
+        
+    if not current_user.verification_code:
+        raise HTTPException(status_code=400, detail="No verification pending")
+        
+    if current_user.verification_code_expires < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Verification code expired")
+        
+    if current_user.verification_code != verification_code:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+    
+    current_user.email_verified = True
+    current_user.verification_code = None
+    current_user.verification_code_expires = None
+    
+    session.add(current_user)
+    session.commit()
+    
+    return JSONResponse({"message": "Email verified successfully"})
+
+@app.post("/users/resend-verification", response_model=BasicResponse, tags=["auth"])
+async def resend_verification(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)]
+) -> JSONResponse:
+    """Resend verification email"""
+    if current_user.email_verified:
+        raise HTTPException(status_code=400, detail="Email already verified")
+    
+    verification_code = generate_verification_code()
+    current_user.verification_code = verification_code
+    current_user.verification_code_expires = datetime.now(timezone.utc) + \
+        timedelta(minutes=settings.VERIFICATION_CODE_EXPIRE_MINUTES)
+    
+    if send_verification_email(current_user.email, verification_code):
+        session.add(current_user)
+        session.commit()
+        return JSONResponse({"message": "Verification email sent"})
+    else:
+        raise HTTPException(status_code=500, detail="Failed to send verification email")
+
+@app.post("/users/2fa/enable", tags=["auth"], response_model=TwoFactorSetupResponse)
+async def enable_2fa(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Enable 2FA for the current user"""
+    if current_user.two_factor_enabled:
+        raise HTTPException(status_code=400, detail="2FA already enabled")
+
+    secret = TwoFactorService.generate_secret()
+    current_user.two_factor_secret = secret
+    
+    session.add(current_user)
+    session.commit()
+    
+    # Return QR code URI for the authenticator app
+    qr_uri = TwoFactorService.get_totp_uri(current_user)
+    return {"secret": secret, "qr_uri": qr_uri}
+
+@app.post("/users/2fa/verify", tags=["auth"], response_model=BasicResponse)
+async def verify_2fa(
+    code: str,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Verify 2FA code and enable 2FA if correct"""
+    if not current_user.two_factor_secret:
+        raise HTTPException(status_code=400, detail="2FA not set up")
+        
+    if TwoFactorService.verify_code(current_user.two_factor_secret, code):
+        current_user.two_factor_enabled = True
+        session.add(current_user)
+        session.commit()
+        return {"message": "2FA enabled successfully"}
+    
+    raise HTTPException(status_code=400, detail="Invalid verification code")
+
+@app.post("/auth/2fa/login", tags=["auth"], response_model=BasicResponse)
+async def login_2fa(
+    code: str,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """Second step of 2FA login"""
+    if not current_user.two_factor_enabled:
+        raise HTTPException(status_code=400, detail="2FA not enabled")
+        
+    if not TwoFactorService.verify_code(current_user.two_factor_secret, code):
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+        
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": current_user.username}, expires_delta=access_token_expires
+    )
+    logger.info(f"Successful login for user: {current_user.username}")
+    response = JSONResponse({"message": "Login successful"})
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {access_token}",
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    return response
 
 
 if __name__ == "__main__":
