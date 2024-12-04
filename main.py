@@ -5,6 +5,7 @@ from uuid import uuid4
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from services.email import generate_verification_code, send_verification_email
 from services.two_factor import TwoFactorService
@@ -62,6 +63,7 @@ from models import (
 )
 
 from sqlmodel import create_engine
+from auth.security import verify_password, get_password_hash
 
 settings = get_settings()
 
@@ -92,6 +94,28 @@ def custom_generate_unique_id(route: APIRoute):
     return f"{route.tags[0] if route.tags else ""}-{route.name}"
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async def cleanup_task():
+        while True:
+            await clean_old_files(days=7)
+            await asyncio.sleep(86400)  # Wait 24 hours
+
+    asyncio.create_task(cleanup_task())
+
+    try:
+        # Initialize Redis cache
+        redis = aioredis.from_url(
+            settings.REDIS_URL, encoding="utf8", decode_responses=True
+        )
+        logger.info("Successfully connected to Redis")
+    except Exception as e:
+        logger.error(f"Failed to connect to Redis: {str(e)}")
+        raise
+
+    yield
+
+
 # FastAPI app initialization
 app = FastAPI(
     title=settings.APP_NAME,
@@ -103,6 +127,7 @@ app = FastAPI(
     contact=settings.CONTACT,
     license_info=settings.LICENSE_INFO,
     generate_unique_id_function=custom_generate_unique_id,
+    lifespan=lifespan,
 )
 
 logger = logging.getLogger(__name__)
@@ -158,19 +183,6 @@ app.add_middleware(
 Instrumentator().instrument(app).expose(app)
 
 
-@app.on_event("startup")
-async def startup_event():
-    try:
-        # Initialize Redis cache
-        redis = aioredis.from_url(
-            settings.REDIS_URL, encoding="utf8", decode_responses=True
-        )
-        logger.info("Successfully connected to Redis")
-    except Exception as e:
-        logger.error(f"Failed to connect to Redis: {str(e)}")
-        raise
-
-
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -204,18 +216,7 @@ manager = ConnectionManager()
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
 
 def get_user(username: str, session: Session):
     user = session.exec(select(User).where(User.username == username)).first()
@@ -327,9 +328,12 @@ async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     session: SessionDep,
     _: Annotated[
-        None, Depends(lambda: rate_limit("login", settings.LOGIN_ATTEMPTS_PER_MINUTE).__await__)
+        None,
+        Depends(
+            lambda: rate_limit("login", settings.LOGIN_ATTEMPTS_PER_MINUTE).__await__
+        ),
     ],
-) -> JSONResponse:
+) -> BasicResponse:
     """
     Login endpoint to obtain access token.
 
@@ -379,7 +383,7 @@ async def logout():
 # ============= User Management Endpoints =============
 
 
-@app.post("/users", response_model=UserPublic, tags=["users"])
+@app.post("/users", response_model=BasicResponse, tags=["users"])
 async def create_user(user: UserCreate, session: SessionDep) -> User:
     """Create a new user account"""
     user_db = User.model_validate(user)
@@ -391,24 +395,39 @@ async def create_user(user: UserCreate, session: SessionDep) -> User:
         raise HTTPException(status_code=409, detail="User already exists")
     user_db.password = get_password_hash(user_db.password)
     verification_code = generate_verification_code()
-    expires = datetime.now(timezone.utc) + \
-        timedelta(minutes=settings.VERIFICATION_CODE_EXPIRE_MINUTES)
-    
+    expires = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.VERIFICATION_CODE_EXPIRE_MINUTES
+    )
+
     db_user = User(
         username=user_db.username,
         full_name=user_db.full_name,
         email=user_db.email,
-        password=get_password_hash(user_db.password),
+        password=user_db.password,
         verification_code=verification_code,
-        verification_code_expires=expires
+        verification_code_expires=expires,
     )
-    
+
     session.add(db_user)
     session.commit()
     session.refresh(db_user)
-    
+
     if send_verification_email(user_db.email, verification_code):
-        return db_user
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username}, expires_delta=access_token_expires
+        )
+        logger.info(f"Successful user register for user: {user.username}")
+        response = JSONResponse({"message": "Register successful"})
+        response.set_cookie(
+            key="access_token",
+            value=f"Bearer {access_token}",
+            httponly=True,
+            secure=True,
+            samesite="Lax",
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
+        return response
     else:
         session.delete(db_user)
         session.commit()
@@ -517,7 +536,9 @@ async def update_profile_picture(
     "/posts",
     response_model=PostPublic,
     tags=["posts"],
-    dependencies=[Depends(lambda: rate_limit("posts", settings.POSTS_PER_MINUTE).__await__)],
+    dependencies=[
+        Depends(lambda: rate_limit("posts", settings.POSTS_PER_MINUTE).__await__)
+    ],
 )
 async def create_post(
     post: PostCreate,
@@ -689,6 +710,7 @@ async def like_post(
         }
     )
 
+
 @app.delete("/like", response_model=BasicResponse, tags=["social"])
 async def delete_like_post(
     session: SessionDep,
@@ -718,6 +740,7 @@ async def delete_like_post(
             "message": f"User {current_user.username} doesnt like the post {post.id} any longer."
         }
     )
+
 
 # ============= User Profile Endpoints =============
 
@@ -777,6 +800,7 @@ def get_user_with_follows(username, session):
     user_public = UserPublicWithLikesAndFollows(
         username=user.username,
         full_name=user.full_name,
+        email=user.email,
         likes=user.likes,
         posts=user.posts,
         pfp=user.pfp,
@@ -905,58 +929,49 @@ async def clear_cache(current_user: AdminUser):
         raise HTTPException(status_code=500, detail="Error clearing cache")
 
 
-@app.on_event("startup")
-async def setup_periodic_tasks():
-    async def cleanup_task():
-        while True:
-            await clean_old_files(days=7)
-            await asyncio.sleep(86400)  # Wait 24 hours
-
-    asyncio.create_task(cleanup_task())
-
-
 @app.post("/users/verify-email", response_model=BasicResponse, tags=["auth"])
 async def verify_email(
     verification_code: str,
     session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> JSONResponse:
     """Verify user's email with the provided code"""
     if current_user.email_verified:
         raise HTTPException(status_code=400, detail="Email already verified")
-        
+
     if not current_user.verification_code:
         raise HTTPException(status_code=400, detail="No verification pending")
-        
+
     if current_user.verification_code_expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Verification code expired")
-        
+
     if current_user.verification_code != verification_code:
         raise HTTPException(status_code=400, detail="Invalid verification code")
-    
+
     current_user.email_verified = True
     current_user.verification_code = None
     current_user.verification_code_expires = None
-    
+
     session.add(current_user)
     session.commit()
-    
+
     return JSONResponse({"message": "Email verified successfully"})
+
 
 @app.post("/users/resend-verification", response_model=BasicResponse, tags=["auth"])
 async def resend_verification(
-    session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]
 ) -> JSONResponse:
     """Resend verification email"""
     if current_user.email_verified:
         raise HTTPException(status_code=400, detail="Email already verified")
-    
+
     verification_code = generate_verification_code()
     current_user.verification_code = verification_code
-    current_user.verification_code_expires = datetime.now(timezone.utc) + \
-        timedelta(minutes=settings.VERIFICATION_CODE_EXPIRE_MINUTES)
-    
+    current_user.verification_code_expires = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.VERIFICATION_CODE_EXPIRE_MINUTES
+    )
+
     if send_verification_email(current_user.email, verification_code):
         session.add(current_user)
         session.commit()
@@ -964,10 +979,10 @@ async def resend_verification(
     else:
         raise HTTPException(status_code=500, detail="Failed to send verification email")
 
+
 @app.post("/users/2fa/enable", tags=["auth"], response_model=TwoFactorSetupResponse)
 async def enable_2fa(
-    session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]
 ):
     """Enable 2FA for the current user"""
     if current_user.two_factor_enabled:
@@ -975,45 +990,47 @@ async def enable_2fa(
 
     secret = TwoFactorService.generate_secret()
     current_user.two_factor_secret = secret
-    
+
     session.add(current_user)
     session.commit()
-    
+
     # Return QR code URI for the authenticator app
     qr_uri = TwoFactorService.get_totp_uri(current_user)
     return {"secret": secret, "qr_uri": qr_uri}
+
 
 @app.post("/users/2fa/verify", tags=["auth"], response_model=BasicResponse)
 async def verify_2fa(
     code: str,
     session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ):
     """Verify 2FA code and enable 2FA if correct"""
     if not current_user.two_factor_secret:
         raise HTTPException(status_code=400, detail="2FA not set up")
-        
+
     if TwoFactorService.verify_code(current_user.two_factor_secret, code):
         current_user.two_factor_enabled = True
         session.add(current_user)
         session.commit()
         return {"message": "2FA enabled successfully"}
-    
+
     raise HTTPException(status_code=400, detail="Invalid verification code")
+
 
 @app.post("/auth/2fa/login", tags=["auth"], response_model=BasicResponse)
 async def login_2fa(
     code: str,
     session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_user)]
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Second step of 2FA login"""
     if not current_user.two_factor_enabled:
         raise HTTPException(status_code=400, detail="2FA not enabled")
-        
+
     if not TwoFactorService.verify_code(current_user.two_factor_secret, code):
         raise HTTPException(status_code=400, detail="Invalid verification code")
-        
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": current_user.username}, expires_delta=access_token_expires

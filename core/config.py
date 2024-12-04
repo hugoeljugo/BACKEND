@@ -105,7 +105,7 @@ SOFTWARE.""",
     API_KEY_NAME: str = "X-API-Key"
     
     # Email Settings
-    SMTP_HOST: str = "maildev"
+    SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 1025
     SMTP_USER: str
     SMTP_PASSWORD: str
