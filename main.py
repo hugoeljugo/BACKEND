@@ -84,6 +84,13 @@ def create_db_and_tables():
 def main():
     create_db_and_tables()
 
+    # Import and create test data if running directly
+    try:
+        from seed_data import create_test_data
+        create_test_data()
+    except Exception as e:
+        logger.error(f"Failed to create test data: {str(e)}")
+
 
 def get_session():
     with Session(engine) as session:
@@ -862,7 +869,7 @@ async def create_log(
     if request.client.host == "127.0.0.1":
         is_authorized = True
     else:
-        is_authorized = current_user is not None or api_key == API_KEY
+        is_authorized = current_user is not None or api_key == settings.API_KEY
 
     if not is_authorized:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -942,7 +949,7 @@ async def verify_email(
     if not current_user.verification_code:
         raise HTTPException(status_code=400, detail="No verification pending")
 
-    if current_user.verification_code_expires < datetime.now(timezone.utc):
+    if current_user.verification_code_expires.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Verification code expired")
 
     if current_user.verification_code != verification_code:
