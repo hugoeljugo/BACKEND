@@ -26,9 +26,30 @@ class Settings(BaseSettings):
     REDOC_URL: str = "/redoc"
     OPENAPI_URL: str = "/openapi.json"
     OPENAPI_TAGS: list[dict] = [
-        {"name": "users", "description": "Operations with users"},
-        {"name": "posts", "description": "Operations with posts"},
-        {"name": "logs", "description": "System logging operations"},
+        {
+            "name": "auth",
+            "description": "Authentication operations including login, logout, and 2FA"
+        },
+        {
+            "name": "users",
+            "description": "User operations including profile management and verification"
+        },
+        {
+            "name": "posts",
+            "description": "Post creation, retrieval, and management operations"
+        },
+        {
+            "name": "social",
+            "description": "Social interactions including following users and liking posts"
+        },
+        {
+            "name": "files",
+            "description": "File operations including profile picture management"
+        },
+        {
+            "name": "admin",
+            "description": "Administrative operations including logs and cache management",
+        }
     ]
     CONTACT: dict = {"name": "hugoeljugo", "email": "hugougena27@gmail.com"}
     LICENSE_INFO: dict = {

@@ -1,7 +1,11 @@
-from models import PostPublic, UserPublic, PostPublicWithLikes
+from typing import List
+from pydantic import BaseModel
+
+from .post import PostPublicWithLikes
+from .user import UserPublic
 
 class UserPublicWithLikesAndFollows(UserPublic):
-    posts: list["PostPublicWithLikes"]
-    likes: list["PostPublicWithLikes"]
-    follows: list["UserPublic"] | None
-    followed_by: list["UserPublic"] | None
+    likes: List[PostPublicWithLikes] = []
+    posts: List[PostPublicWithLikes] = []
+    follows: List[UserPublic] | None = None
+    followed_by: List[UserPublic] | None = None
