@@ -21,7 +21,7 @@ class PostPublic(PostBase):
 
 class PostPublicWithLikes(PostPublic):
     liked_by: list["UserPublic"]
-    user: UserPublic
+
 
 class PostCreate(PostBase):
     pass

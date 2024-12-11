@@ -7,12 +7,10 @@ import re
 
 from models import (
     User, UserCreate, UserUpdate, UserPublic, 
-    UserPublicWithLikesAndFollows, BasicResponse,
-    PostPublicWithLikes
+    BasicResponse, PostPublicWithLikes
 )
 from dependencies import (
-    SessionDep, get_current_active_user, get_user,
-    get_user_with_follows
+    SessionDep, get_current_active_user, get_user, get_user_public,
 )
 from services.email import generate_verification_code, send_verification_email
 from auth.security import get_password_hash
@@ -77,14 +75,15 @@ async def create_user(user: UserCreate, session: SessionDep) -> User:
         session.commit()
         raise HTTPException(status_code=500, detail="Failed to send verification email")
 
-@router.get("/me", response_model=UserPublicWithLikesAndFollows)
+@router.get("/me", response_model=UserPublic)
 @cache_response(settings.CACHE_EXPIRE_TIME)
 async def get_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
     session: SessionDep
-) -> UserPublicWithLikesAndFollows:
+) -> UserPublic:
     """Get current user's profile information"""
-    return get_user_with_follows(current_user.username, session)
+    user = get_user(current_user.username, session)
+    return get_user_public(user, session)
 
 @router.patch("/me", response_model=UserPublic)
 async def update_own_user(
@@ -111,14 +110,14 @@ async def delete_user_me(
     session.commit()
     return JSONResponse({"message": f"User {current_user.username} deleted successfully"})
 
-@router.get("/{username}", response_model=UserPublicWithLikesAndFollows)
+@router.get("/{username}", response_model=UserPublic)
 @cache_response(settings.CACHE_EXPIRE_TIME)
 async def get_user_by_username(username: str, session: SessionDep):
     """Get public profile information for any user"""
-    user = get_user_with_follows(username, session)
+    user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return get_user_public(user, session)
 
 @router.get("/{username}/posts", response_model=List[PostPublicWithLikes])
 async def get_user_posts(username: str, session: SessionDep):

@@ -48,6 +48,13 @@ class User(UserBase, table=True):
 
 class UserPublic(UserBase):
     pfp: str
+    is_admin: bool
+    email_verified: bool
+    two_factor_enabled: bool
+    likes: int
+    posts: int
+    follows: int
+    followed_by: int
 
 
 class UserCreate(UserBase):

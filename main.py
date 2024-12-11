@@ -2,12 +2,13 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from prometheus_fastapi_instrumentator import Instrumentator
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import SQLModel, create_engine, Session
 from redis import asyncio as aioredis
 
 from core.config import get_settings
@@ -34,6 +35,9 @@ os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
 # Database setup
 engine = create_engine(settings.DATABASE_URL, echo=True)
 
+# Add this near the top with other global variables
+redis: aioredis.Redis = None
+
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
 
@@ -52,6 +56,7 @@ async def periodic_cleanup(days: int, interval: int):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Setup and cleanup tasks for the application lifecycle"""
+    global redis
     # Start background cleanup task
     cleanup_task = asyncio.create_task(
         periodic_cleanup(days=7, interval=86400)  # Clean files older than 7 days, every 24h
@@ -59,7 +64,7 @@ async def lifespan(app: FastAPI):
     
     try:
         # Initialize Redis cache
-        redis = aioredis.from_url(
+        redis = await aioredis.from_url(
             settings.REDIS_URL, encoding="utf8", decode_responses=True
         )
         logger.info("Successfully connected to Redis")
@@ -73,6 +78,9 @@ async def lifespan(app: FastAPI):
             await cleanup_task
         except asyncio.CancelledError:
             pass
+        # Clean up Redis connection
+        if redis:
+            await redis.close()
 
 def create_application() -> FastAPI:
     """Create and configure the FastAPI application"""
@@ -126,6 +134,29 @@ def main():
         create_test_data()
     except Exception as e:
         logger.error(f"Failed to create test data: {e}")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Check database connection
+        with Session(engine) as session:
+            session.execute("SELECT 1")
+        
+        # Check Redis connection
+        await redis.ping()
+        
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc),
+            "version": settings.APP_VERSION
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail="Service unavailable"
+        )
 
 if __name__ == "__main__":
     main()

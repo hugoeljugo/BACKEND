@@ -7,6 +7,7 @@ from time import time
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import JSONResponse
+from models.user import UserPublic
 from sqlmodel import Session, select, create_engine
 from jwt.exceptions import InvalidTokenError
 import jwt
@@ -14,7 +15,7 @@ from redis import asyncio as aioredis
 from sqlmodel import col
 
 from core.config import get_settings
-from models import User, TokenData, UserPublicWithLikesAndFollows, UserLink
+from models import User, TokenData, UserLink
 from auth.security import verify_password
 
 settings = get_settings()
@@ -138,37 +139,18 @@ def setup_error_handlers(app):
             content={"detail": "An unexpected error occurred", "error_id": error_id},
         ) 
 
-def get_user_with_follows(username: str, session: Session):
-    """Get user with their follows and followers"""
-    user = get_user(username, session)
-    if not user:
-        return False
-    
-    user_public = UserPublicWithLikesAndFollows(
+
+def get_user_public(user: User, session: Session) -> UserPublic:
+    return UserPublic(
         username=user.username,
         full_name=user.full_name,
         email=user.email,
-        likes=user.likes,
-        posts=user.posts,
         pfp=user.pfp,
-        follows=None,
-        followed_by=None,
+        is_admin=user.is_admin,
+        email_verified=user.email_verified,
+        two_factor_enabled=user.two_factor_enabled,
+        likes=len(user.likes),
+        posts=len(user.posts),
+        follows=len(list(session.exec(select(UserLink).where(UserLink.user_id == user.id)))),
+        followed_by=len(list(session.exec(select(UserLink).where(UserLink.following_id == user.id))))
     )
-    
-    user_public.follows = session.exec(
-        select(User).where(
-            col(User.id).in_(
-                select(UserLink.following_id).where(user.id == UserLink.user_id)
-            )
-        )
-    ).all()
-    
-    user_public.followed_by = session.exec(
-        select(User).where(
-            col(User.id).in_(
-                select(UserLink.user_id).where(user.id == UserLink.following_id)
-            )
-        )
-    ).all()
-    
-    return user_public
