@@ -7,10 +7,10 @@ import re
 
 from models import (
     User, UserCreate, UserUpdate, UserPublic, 
-    BasicResponse, PostPublicWithLikes
+    BasicResponse, PostPublic
 )
 from dependencies import (
-    SessionDep, get_current_active_user, get_user, get_user_public,
+    SessionDep, get_current_active_user, get_user,
 )
 from services.email import generate_verification_code, send_verification_email
 from auth.security import get_password_hash
@@ -83,7 +83,7 @@ async def get_users_me(
 ) -> UserPublic:
     """Get current user's profile information"""
     user = get_user(current_user.username, session)
-    return get_user_public(user, session)
+    return user
 
 @router.patch("/me", response_model=UserPublic)
 async def update_own_user(
@@ -117,20 +117,20 @@ async def get_user_by_username(username: str, session: SessionDep):
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return get_user_public(user, session)
+    return user
 
-@router.get("/{username}/posts", response_model=List[PostPublicWithLikes])
+@router.get("/{username}/posts", response_model=List[PostPublic])
 async def get_user_posts(username: str, session: SessionDep):
     """Get all posts from a specific user"""
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user.posts
+    return sorted(user.posts, key=lambda post: post.date, reverse=True)
 
-@router.get("/{username}/likes", response_model=List[PostPublicWithLikes])
+@router.get("/{username}/likes", response_model=List[PostPublic])
 async def get_user_likes(username: str, session: SessionDep):
     """Get all posts that a specific user has liked"""
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user.likes 
+    return sorted(user.likes, key=lambda post: post.date, reverse=True)

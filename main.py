@@ -14,8 +14,8 @@ from prometheus_client import Counter, Histogram
 
 from core.config import get_settings
 from core.logging_config import setup_logging
-from core.tasks import clean_old_files
-from dependencies import get_session, log_requests, setup_error_handlers
+from core.tasks import clean_old_files, update_engagement_scores
+from dependencies import get_session, log_requests, setup_error_handlers, setup_last_active_middleware
 from routers import (
     auth_router,
     users_router,
@@ -73,7 +73,9 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(
         periodic_cleanup(days=7, interval=86400)  # Clean files older than 7 days, every 24h
     )
-    
+    engagement_task = asyncio.create_task(
+        update_engagement_scores(next(get_session()))
+    )
     try:
         # Initialize Redis cache
         redis = await aioredis.from_url(
@@ -86,6 +88,7 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         cleanup_task.cancel()
+        engagement_task.cancel()
         try:
             await cleanup_task
         except asyncio.CancelledError:
@@ -121,6 +124,9 @@ def create_application() -> FastAPI:
 
     # Add error handlers
     setup_error_handlers(app)
+
+    # Add last active middleware
+    setup_last_active_middleware(app)
 
     # Enhanced instrumentation
     Instrumentator().instrument(app)\

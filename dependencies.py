@@ -12,10 +12,9 @@ from sqlmodel import Session, select, create_engine
 from jwt.exceptions import InvalidTokenError
 import jwt
 from redis import asyncio as aioredis
-from sqlmodel import col
 
 from core.config import get_settings
-from models import User, TokenData, UserLink
+from models import User, TokenData, UserFollow
 from auth.security import verify_password
 
 settings = get_settings()
@@ -139,18 +138,20 @@ def setup_error_handlers(app):
             content={"detail": "An unexpected error occurred", "error_id": error_id},
         ) 
 
-
-def get_user_public(user: User, session: Session) -> UserPublic:
-    return UserPublic(
-        username=user.username,
-        full_name=user.full_name,
-        email=user.email,
-        pfp=user.pfp,
-        is_admin=user.is_admin,
-        email_verified=user.email_verified,
-        two_factor_enabled=user.two_factor_enabled,
-        likes=len(user.likes),
-        posts=len(user.posts),
-        follows=len(list(session.exec(select(UserLink).where(UserLink.user_id == user.id)))),
-        followed_by=len(list(session.exec(select(UserLink).where(UserLink.following_id == user.id))))
-    )
+def setup_last_active_middleware(app):
+    @app.middleware("http")
+    async def update_last_active(request: Request, call_next):
+        response = await call_next(request)
+        
+        if "access_token" in request.cookies:
+            try:
+                session = next(get_session())
+                current_user = await get_current_user(request, session)
+                if current_user:
+                    current_user.last_active = datetime.now(timezone.utc)
+                    session.add(current_user)
+                    session.commit()
+            except Exception as e:
+                logger.error(f"Failed to update last_active: {e}")
+        
+        return response

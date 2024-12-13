@@ -4,9 +4,10 @@ from fastapi.responses import JSONResponse
 from sqlmodel import select
 import logging
 
-from models import User, Post, BasicResponse, UserLink, PostUserLink
+from models import User, Post, BasicResponse, UserFollow, PostUserLink, Interaction, InteractionType
 from dependencies import SessionDep, get_current_active_user, get_user
 from core.config import get_settings
+from services.engagement import calculate_post_engagement_score, update_user_engagement_rate
 
 router = APIRouter()
 settings = get_settings()
@@ -23,18 +24,20 @@ async def follow_user(
     if not followed:
         raise HTTPException(status_code=404, detail="User not found")
 
-    existing_link = session.exec(
-        select(UserLink).where(
-            UserLink.user_id == current_user.id,
-            UserLink.following_id == followed.id
-        )
-    ).first()
+
+    existing_link = current_user.following.filter(UserFollow.followed_id == followed.id).first()
 
     if existing_link:
         raise HTTPException(status_code=400, detail="Already following this user")
 
-    user_link = UserLink(user_id=current_user.id, following_id=followed.id)
-    session.add(user_link)
+    # Update counts
+    current_user.following_count += 1
+    followed.follower_count += 1
+
+    current_user.following.append(followed)
+    followed.followers.append(current_user)
+
+    session.add_all([current_user, followed])
     session.commit()
     return JSONResponse({"message": "User followed successfully"})
 
@@ -49,17 +52,20 @@ async def unfollow_user(
     if not unfollowed:
         raise HTTPException(status_code=404, detail="User not found")
 
-    existing_link = session.exec(
-        select(UserLink).where(
-            UserLink.user_id == current_user.id,
-            UserLink.following_id == unfollowed.id
-        )
-    ).first()
+
+    existing_link = current_user.following.filter(UserFollow.followed_id == unfollowed.id).first()
 
     if not existing_link:
         raise HTTPException(status_code=400, detail="Not following this user")
+    
+    # Update counts
+    current_user.following_count -= 1
+    unfollowed.follower_count -= 1
 
-    session.delete(existing_link)
+    current_user.following.remove(unfollowed)
+    unfollowed.followers.remove(current_user)
+
+    session.add_all([current_user, unfollowed])
     session.commit()
     return JSONResponse({"message": "User unfollowed successfully"})
 
@@ -74,19 +80,33 @@ async def like_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    existing_link = session.exec(
-        select(PostUserLink).where(
-            PostUserLink.user_id == current_user.id,
-            PostUserLink.post_id == post.id
-        )
-    ).first()
+    existing_link = current_user.liked_posts.filter(PostUserLink.post_id == post.id).first()
 
     if existing_link:
         raise HTTPException(status_code=400, detail="Already liked this post")
 
-    post_user_link = PostUserLink(user_id=current_user.id, post_id=post.id)
-    session.add(post_user_link)
+    # Create like interaction
+    interaction = Interaction(
+        user_id=current_user.id,
+        post_id=post.id,
+        interaction_type=InteractionType.LIKE
+    )
+    
+    # Update metrics
+    post.like_count += 1
+    post.engagement_score = calculate_post_engagement_score(post)
+    post.user.total_likes_received += 1
+    
+    # Add records to database
+    current_user.liked_posts.append(post)
+    post.liked_by.append(current_user)
+    session.add_all([current_user, post, interaction])
     session.commit()
+    
+    # Update user engagement rates
+    update_user_engagement_rate(current_user, session)
+    update_user_engagement_rate(post.user, session)
+    
     return JSONResponse({"message": "Post liked successfully"})
 
 @router.delete("/like", response_model=BasicResponse)
@@ -100,16 +120,13 @@ async def unlike_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    existing_link = session.exec(
-        select(PostUserLink).where(
-            PostUserLink.user_id == current_user.id,
-            PostUserLink.post_id == post.id
-        )
-    ).first()
+    existing_link = current_user.liked_posts.filter(PostUserLink.post_id == post.id).first()
 
     if not existing_link:
         raise HTTPException(status_code=400, detail="Not liked this post")
 
-    session.delete(existing_link)
+    current_user.liked_posts.remove(post)
+    post.liked_by.remove(current_user)
+    session.add_all([current_user, post])
     session.commit()
     return JSONResponse({"message": "Post unliked successfully"}) 
