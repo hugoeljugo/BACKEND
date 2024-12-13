@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from prometheus_fastapi_instrumentator import Instrumentator
-from sqlmodel import SQLModel, create_engine, Session
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
+from sqlmodel import SQLModel, create_engine, Session, select
 from redis import asyncio as aioredis
+from prometheus_client import Counter, Histogram
 
 from core.config import get_settings
 from core.logging_config import setup_logging
@@ -37,6 +38,17 @@ engine = create_engine(settings.DATABASE_URL, echo=True)
 
 # Add this near the top with other global variables
 redis: aioredis.Redis = None
+
+# Define custom metrics
+api_users_total = Counter(
+    "api_users_total",
+    "Total number of users in the system"
+)
+
+custom_latency = Histogram(
+    "custom_endpoint_latency_seconds",
+    "Custom latency tracking for specific operations"
+)
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
@@ -110,8 +122,13 @@ def create_application() -> FastAPI:
     # Add error handlers
     setup_error_handlers(app)
 
-    # Add monitoring
-    Instrumentator().instrument(app).expose(app)
+    # Enhanced instrumentation
+    Instrumentator().instrument(app)\
+        .add(metrics.request_size())\
+        .add(metrics.response_size())\
+        .add(metrics.latency(buckets=[0.1, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0]))\
+        .add(metrics.requests(should_include_handler=True))\
+        .expose(app, include_in_schema=True, should_gzip=True)
 
     # Include routers
     app.include_router(auth_router, prefix="/auth", tags=["auth"])
@@ -141,7 +158,7 @@ async def health_check():
     try:
         # Check database connection
         with Session(engine) as session:
-            session.execute("SELECT 1")
+            session.exec(select().limit(1))
         
         # Check Redis connection
         await redis.ping()
