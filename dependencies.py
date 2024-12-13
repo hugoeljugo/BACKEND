@@ -7,6 +7,7 @@ from time import time
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import JSONResponse
+from models.post import Post, PostPublic
 from models.user import UserPublic
 from sqlmodel import Session, select, create_engine
 from jwt.exceptions import InvalidTokenError
@@ -155,3 +156,14 @@ def setup_last_active_middleware(app):
                 logger.error(f"Failed to update last_active: {e}")
         
         return response
+
+
+def add_liked_status(post: Post, current_user: User | None) -> PostPublic:
+    """Helper function to convert Post to PostPublic with liked status"""
+    post_dict = post.model_dump()
+    post_dict["is_liked_by_user"] = (
+        current_user.id in [user.id for user in post.liked_by] 
+        if current_user else None
+    )
+    post_dict["user"] = UserPublic.model_validate(post.user)
+    return PostPublic(**post_dict)

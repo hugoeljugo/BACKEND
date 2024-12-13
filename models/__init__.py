@@ -5,6 +5,7 @@ from .log import Log
 from .auth import Token, TokenData
 from .interaction import Interaction, InteractionType
 from .topic import Topic, PostTopic, UserTopic
+from .postuserlink import PostUserLink
 
 __all__ = [
     "User", "UserCreate", "UserUpdate", "UserPublic", "UserFollow",
@@ -13,5 +14,6 @@ __all__ = [
     "Log",
     "Token", "TokenData",
     "Interaction", "InteractionType",
-    "Topic", "PostTopic", "UserTopic"
+    "Topic", "PostTopic", "UserTopic",
+    "PostUserLink"
 ]

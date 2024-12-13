@@ -10,7 +10,7 @@ from models import (
     BasicResponse, PostPublic
 )
 from dependencies import (
-    SessionDep, get_current_active_user, get_user,
+    SessionDep, get_current_active_user, get_user, add_liked_status
 )
 from services.email import generate_verification_code, send_verification_email
 from auth.security import get_password_hash
@@ -120,17 +120,25 @@ async def get_user_by_username(username: str, session: SessionDep):
     return user
 
 @router.get("/{username}/posts", response_model=List[PostPublic])
-async def get_user_posts(username: str, session: SessionDep):
+async def get_user_posts(
+    username: str, 
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
     """Get all posts from a specific user"""
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return sorted(user.posts, key=lambda post: post.date, reverse=True)
+    return sorted([add_liked_status(post, current_user) for post in user.posts], key=lambda post: post.date, reverse=True)
 
 @router.get("/{username}/likes", response_model=List[PostPublic])
-async def get_user_likes(username: str, session: SessionDep):
+async def get_user_likes(
+    username: str, 
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
     """Get all posts that a specific user has liked"""
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return sorted(user.likes, key=lambda post: post.date, reverse=True)
+    return sorted([add_liked_status(post, current_user) for post in user.likes], key=lambda post: post.date, reverse=True)

@@ -4,9 +4,10 @@ from fastapi.responses import JSONResponse
 from sqlmodel import select
 import logging
 from datetime import datetime, timedelta, timezone
+from sqlalchemy import Float, case, func, select as sa_select, cast
 
-from models import User, Post, PostCreate, PostPublic, Interaction, InteractionType
-from dependencies import SessionDep, get_current_active_user, rate_limit
+from models import User, Post, PostCreate, PostPublic, Interaction, InteractionType, PostUserLink, Topic
+from dependencies import SessionDep, get_current_active_user, rate_limit, add_liked_status
 from core.config import get_settings
 from cache import cache_response
 from services.engagement import calculate_post_engagement_score, update_user_engagement_rate
@@ -15,14 +16,6 @@ router = APIRouter()
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-def add_liked_status(post: Post, current_user: User | None) -> PostPublic:
-    """Helper function to convert Post to PostPublic with liked status"""
-    post_dict = post.model_dump()
-    post_dict["is_liked_by_user"] = (
-        current_user.id in [user.id for user in post.liked_by] 
-        if current_user else None
-    )
-    return PostPublic(**post_dict)
 
 @router.post(
     "",
@@ -62,6 +55,89 @@ async def get_own_posts(
     """Get all posts created by the current user"""
     return current_user.posts
 
+
+@router.get("/feed", response_model=List[PostPublic])
+@cache_response(settings.CACHE_EXPIRE_TIME)
+async def get_posts_feed(
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+):
+    """Get personalized post feed"""
+    try:
+        offset = (page - 1) * limit
+        
+        # Get user's interested topics and following list
+        user_topic_ids = [t.id for t in current_user.interested_topics]
+        following_ids = [u.id for u in current_user.following]
+        
+        base_query = select(Post).join(User).where(
+            Post.parent_id == None  # Only get top-level posts
+        ).order_by(
+            (
+                # Post engagement (25%)
+                Post.engagement_score * 0.25 +
+                
+                # Author credibility (15%)
+                (User.engagement_rate * 0.07 +
+                 case(
+                     (User.is_verified == True, 0.04),
+                     else_=0.0
+                 ) +
+                 case(
+                     (User.follower_count / 100.0 > 0.04, 0.04),
+                     else_=func.least(User.follower_count / 100.0, 0.04)
+                 )) +
+                
+                # Author activity (10%)
+                cast(func.extract('epoch', User.last_active), Float) / 
+                cast(func.extract('epoch', func.now()), Float) * 0.1 +
+                
+                # Content freshness (30%)
+                case(
+                    (cast(func.extract('epoch', func.now() - Post.date), Float) / 86400 > 1, 0),
+                    else_=1.0 - cast(func.extract('epoch', func.now() - Post.date), Float) / 86400
+                ) * 0.3 +
+                
+                # Topic relevance (10%)
+                case(
+                    (Post.topics.any(Topic.id.in_(user_topic_ids)), 0.1),
+                    else_=0
+                ) +
+                
+                # Social graph relevance (5%)
+                case(
+                    (Post.user_id.in_(following_ids), 0.05),
+                    else_=0
+                ) +
+                
+                # Interaction history (5%)
+                case(
+                    (Post.user_id.in_(
+                        sa_select(Post.user_id)
+                        .join(PostUserLink)
+                        .where(PostUserLink.user_id == current_user.id)
+                        .group_by(Post.user_id)
+                        .having(func.count() > 0)
+                    ), 0.05),
+                    else_=0
+                )
+            ).desc()
+        )
+        
+        posts = session.exec(base_query.offset(offset).limit(limit)).all()
+        return [add_liked_status(post, current_user) for post in posts]
+        
+    except Exception as e:
+        logger.error(f"Error in get_posts_feed: {str(e)}")
+        if session.in_transaction():
+            session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while fetching the feed"
+        )
+
 @router.get("/{post_id}", response_model=PostPublic)
 async def get_post(
     post_id: int,
@@ -98,29 +174,6 @@ async def delete_post(
     session.commit()
     return post
 
-@router.get("/feed", response_model=List[PostPublic])
-@cache_response(settings.CACHE_EXPIRE_TIME)
-async def get_posts_feed(
-    session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_active_user)],
-    page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100),
-):
-    """Get personalized post feed"""
-    offset = (page - 1) * limit
-    
-    # Base query with engagement score
-    base_query = select(Post).join(User).where(
-        Post.parent_id == None  # Only get top-level posts
-    ).order_by(
-        # Ranking formula combining multiple factors
-        (Post.engagement_score * 0.4) +  # Post engagement
-        (User.engagement_rate * 0.2) +   # Author authority
-        (Post.date.desc() * 0.4)        # Recency
-    )
-    
-    posts = session.exec(base_query.offset(offset).limit(limit)).all()
-    return [add_liked_status(post, current_user) for post in posts]
 
 @router.post("/{post_id}/view")
 async def track_post_view(
