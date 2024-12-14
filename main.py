@@ -15,14 +15,20 @@ from prometheus_client import Counter, Histogram
 from core.config import get_settings
 from core.logging_config import setup_logging
 from core.tasks import clean_old_files, update_engagement_scores
-from dependencies import get_session, log_requests, setup_error_handlers, setup_last_active_middleware
+from dependencies import (
+    get_session,
+    log_requests,
+    setup_error_handlers,
+    setup_last_active_middleware,
+)
 from routers import (
     auth_router,
     users_router,
     posts_router,
     social_router,
     files_router,
-    admin_router
+    admin_router,
+    chat_router,
 )
 
 # Initialize settings and logging
@@ -50,11 +56,14 @@ custom_latency = Histogram(
     "Custom latency tracking for specific operations"
 )
 
+
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
 
+
 def custom_generate_unique_id(route: APIRoute):
     return f"{route.tags[0] if route.tags else ""}-{route.name}"
+
 
 async def periodic_cleanup(days: int, interval: int):
     """Periodically clean up old files"""
@@ -65,6 +74,7 @@ async def periodic_cleanup(days: int, interval: int):
             logger.error(f"Error in cleanup task: {e}")
         await asyncio.sleep(interval)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Setup and cleanup tasks for the application lifecycle"""
@@ -73,9 +83,7 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(
         periodic_cleanup(days=7, interval=86400)  # Clean files older than 7 days, every 24h
     )
-    engagement_task = asyncio.create_task(
-        update_engagement_scores(next(get_session()))
-    )
+    engagement_task = asyncio.create_task(update_engagement_scores(next(get_session())))
     try:
         # Initialize Redis cache
         redis = await aioredis.from_url(
@@ -96,6 +104,7 @@ async def lifespan(app: FastAPI):
         # Clean up Redis connection
         if redis:
             await redis.close()
+
 
 def create_application() -> FastAPI:
     """Create and configure the FastAPI application"""
@@ -143,20 +152,25 @@ def create_application() -> FastAPI:
     app.include_router(social_router, tags=["social"])
     app.include_router(files_router, prefix="/files", tags=["files"])
     app.include_router(admin_router, prefix="/admin", tags=["admin"])
+    app.include_router(chat_router, prefix="/chat", tags=["chat"])
 
     return app
 
+
 # Create the FastAPI application
 app = create_application()
+
 
 def main():
     """Main function for direct script execution"""
     create_db_and_tables()
     try:
         from seed_data import create_test_data
+
         create_test_data()
     except Exception as e:
         logger.error(f"Failed to create test data: {e}")
+
 
 @app.get("/health")
 async def health_check():
@@ -165,21 +179,19 @@ async def health_check():
         # Check database connection
         with Session(engine) as session:
             session.exec(select().limit(1))
-        
+
         # Check Redis connection
         await redis.ping()
-        
+
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc),
-            "version": settings.APP_VERSION
+            "version": settings.APP_VERSION,
         }
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
-        raise HTTPException(
-            status_code=503,
-            detail="Service unavailable"
-        )
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
 
 if __name__ == "__main__":
     main()

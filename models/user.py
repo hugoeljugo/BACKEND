@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from .topic import UserTopic
 from typing import List
+from .chat import ChatRoom, ChatRoomParticipant
 
 ROOT_DIR = Path(__file__).parent.parent
 PFP = ROOT_DIR / 'default_pfp.png'
@@ -79,6 +80,12 @@ class User(UserBase, table=True):
     interested_topics: List["Topic"] = Relationship(
         back_populates="users",
         link_model=UserTopic
+    )
+
+    # Add chat relationships
+    chat_rooms: List[ChatRoom] = Relationship(
+        back_populates="participants",
+        link_model=ChatRoomParticipant
     )
 
 class UserPublic(UserBase):

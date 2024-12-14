@@ -61,58 +61,71 @@ async def get_own_posts(
 async def get_posts_feed(
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_active_user)],
-    page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100),
+    page: int = Query(1, ge=1),  # Page number, starting from 1
+    limit: int = Query(10, ge=1, le=100),  # Number of posts per page, between 1-100
 ):
     """Get personalized post feed"""
     try:
+        # Calculate offset for pagination
         offset = (page - 1) * limit
         
-        # Get user's interested topics and following list
+        # Get user's interested topics and following list for personalization
         user_topic_ids = [t.id for t in current_user.interested_topics]
         following_ids = [u.id for u in current_user.following]
         
+        # Build the main query with ranking factors
         base_query = select(Post).join(User).where(
-            Post.parent_id == None  # Only get top-level posts
+            Post.parent_id == None  # Only get top-level posts, excluding replies
         ).order_by(
             (
-                # Post engagement (25%)
+                # Post engagement score (25% weight)
+                # Higher engagement (likes, comments, shares) means higher ranking
                 Post.engagement_score * 0.25 +
                 
-                # Author credibility (15%)
-                (User.engagement_rate * 0.07 +
-                 case(
-                     (User.is_verified == True, 0.04),
-                     else_=0.0
-                 ) +
-                 case(
-                     (User.follower_count / 100.0 > 0.04, 0.04),
-                     else_=func.least(User.follower_count / 100.0, 0.04)
-                 )) +
+                # Author credibility score (15% weight total)
+                (
+                    # Author's overall engagement rate (7%)
+                    User.engagement_rate * 0.07 +
+                    # Verified status bonus (4%)
+                    case(
+                        (User.is_verified == True, 0.04),
+                        else_=0.0
+                    ) +
+                    # Follower count influence (4%, capped)
+                    case(
+                        (User.follower_count / 100.0 > 0.04, 0.04),
+                        else_=func.least(User.follower_count / 100.0, 0.04)
+                    )
+                ) +
                 
-                # Author activity (10%)
+                # Author activity recency (10% weight)
+                # More recent activity gives higher score
                 cast(func.extract('epoch', User.last_active), Float) / 
                 cast(func.extract('epoch', func.now()), Float) * 0.1 +
                 
-                # Content freshness (30%)
+                # Content freshness (30% weight)
+                # Posts newer than 24h get higher scores, linear decay
                 case(
                     (cast(func.extract('epoch', func.now() - Post.date), Float) / 86400 > 1, 0),
                     else_=1.0 - cast(func.extract('epoch', func.now() - Post.date), Float) / 86400
                 ) * 0.3 +
                 
-                # Topic relevance (10%)
+                # Topic relevance (10% weight)
+                # Bonus for posts matching user's interested topics
                 case(
                     (Post.topics.any(Topic.id.in_(user_topic_ids)), 0.1),
                     else_=0
                 ) +
                 
-                # Social graph relevance (5%)
+                # Social graph relevance (5% weight)
+                # Bonus for posts from followed users
                 case(
                     (Post.user_id.in_(following_ids), 0.05),
                     else_=0
                 ) +
                 
-                # Interaction history (5%)
+                # Interaction history (5% weight)
+                # Bonus for posts from authors user has interacted with before
                 case(
                     (Post.user_id.in_(
                         sa_select(Post.user_id)
@@ -123,13 +136,16 @@ async def get_posts_feed(
                     ), 0.05),
                     else_=0
                 )
-            ).desc()
+            ).desc()  # Sort by total ranking score in descending order
         )
         
+        # Execute query with pagination
         posts = session.exec(base_query.offset(offset).limit(limit)).all()
+        # Add liked status to each post before returning
         return [add_liked_status(post, current_user) for post in posts]
         
     except Exception as e:
+        # Log any errors and rollback transaction if needed
         logger.error(f"Error in get_posts_feed: {str(e)}")
         if session.in_transaction():
             session.rollback()
