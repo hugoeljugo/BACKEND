@@ -1,13 +1,15 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, List
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 import logging
 import re
 
+from sqlmodel import or_, select
+
 from models import (
     User, UserCreate, UserUpdate, UserPublic, 
-    BasicResponse, PostPublic
+    BasicResponse, PostPublic, Post
 )
 from dependencies import (
     SessionDep, get_current_active_user, get_user, add_liked_status
@@ -119,17 +121,69 @@ async def get_user_by_username(username: str, session: SessionDep):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-@router.get("/{username}/posts", response_model=List[PostPublic])
-async def get_user_posts(
-    username: str, 
-    session: SessionDep,
-    current_user: Annotated[User, Depends(get_current_active_user)]
-):
-    """Get all posts from a specific user"""
-    user = get_user(username, session)
+@router.get("/id/{user_id}", response_model=UserPublic)
+@cache_response(settings.CACHE_EXPIRE_TIME)
+async def get_user_by_id(user_id: int, session: SessionDep):
+    """Get public profile information for any user by ID"""
+    statement = select(User).where(User.id == user_id)
+    user = session.exec(statement).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return sorted([add_liked_status(post, current_user) for post in user.posts], key=lambda post: post.date, reverse=True)
+    return user
+
+@router.get("/search", response_model=List[UserPublic])
+async def search_users(
+    session: SessionDep,
+    query: str = Query(..., min_length=1),
+    limit: int = Query(default=20, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Search users by username or full name"""
+    statement = select(User).where(
+        or_(
+            User.username.ilike(f"%{query}%"),
+            User.full_name.ilike(f"%{query}%")
+        )
+    ).offset(offset).limit(limit)
+    users = session.exec(statement).all()
+    return users
+
+@router.get("/{username}/stats", response_model=dict)
+@cache_response(settings.CACHE_EXPIRE_TIME)
+async def get_user_stats(username: str, session: SessionDep):
+    """Get user statistics"""
+    statement = select(User).where(User.username == username)
+    user = session.exec(statement).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {
+        "post_count": len(user.posts),
+        "likes_received": sum(len(post.liked_by) for post in user.posts),
+        "likes_given": len(user.likes),
+        "join_date": user.created_at,
+    }
+
+@router.get("/{username}/posts", response_model=List[PostPublic])
+async def get_user_posts(
+    username: str,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    limit: int = Query(default=20, le=100),
+    offset: int = Query(default=0, ge=0),
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None
+):
+    """Get all posts from a specific user with pagination and date filtering"""
+    statement = select(Post).join(User).where(User.username == username)
+    
+    if start_date:
+        statement = statement.where(Post.date >= start_date)
+    if end_date:
+        statement = statement.where(Post.date <= end_date)
+        
+    posts = session.exec(statement.order_by(Post.date.desc()).offset(offset).limit(limit)).all()
+    return [add_liked_status(post, current_user) for post in posts]
 
 @router.get("/{username}/likes", response_model=List[PostPublic])
 async def get_user_likes(

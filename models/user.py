@@ -23,13 +23,13 @@ class UserFollow(SQLModel, table=True):
         ondelete="CASCADE"
     )
 class UserBase(SQLModel):
+    id: int | None = Field(default=None, primary_key=True)
     username: str = Field(index=True)
     full_name: str = Field(default=None)
     email: str = Field(index=True)
 
 
 class User(UserBase, table=True):
-    id: int | None = Field(default=None, primary_key=True)
     password: str = Field(index=True)
     pfp: str | None = Field(default='default_pfp.png' )
     disabled: bool | None = Field(default=False)
