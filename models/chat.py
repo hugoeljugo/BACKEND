@@ -8,6 +8,13 @@ class MessageStatus(str, Enum):
     DELIVERED = "delivered"
     READ = "read"
 
+
+class ChatRoomParticipant(SQLModel, table=True):
+    chat_room_id: int = Field(foreign_key="chatroom.id", primary_key=True)
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    last_read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ChatRoom(SQLModel, table=True):
     id: int = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -17,13 +24,9 @@ class ChatRoom(SQLModel, table=True):
     messages: List["Message"] = Relationship(back_populates="chat_room")
     participants: List["User"] = Relationship(
         back_populates="chat_rooms",
-        link_model="ChatRoomParticipant"
+        link_model=ChatRoomParticipant
     )
 
-class ChatRoomParticipant(SQLModel, table=True):
-    chat_room_id: int = Field(foreign_key="chatroom.id", primary_key=True)
-    user_id: int = Field(foreign_key="user.id", primary_key=True)
-    last_read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Message(SQLModel, table=True):
     id: int = Field(default=None, primary_key=True)

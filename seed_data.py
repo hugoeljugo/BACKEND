@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, SQLModel, create_engine, select
-from models import User, Post, PostUserLink, UserFollow, Topic, PostTopic, UserTopic, Interaction, InteractionType
+from models import User, Post, PostUserLink, UserFollow, Topic, PostTopic, UserTopic, Interaction, InteractionType, ChatRoom, Message, MessageStatus
 from core.config import get_settings
 from auth.security import get_password_hash
 import random
@@ -154,11 +154,54 @@ def create_test_data():
             session.add(user)
         
         session.commit()  # Final commit for engagement rates
+
+        # Create chat rooms
+        chat_rooms = []
+        # Create a chat room between user1 and user2
+        chat_room1 = ChatRoom()
+        chat_room1.participants = [users[0], users[1]]
+        chat_rooms.append(chat_room1)
+
+        # Create a chat room between user2 and user3
+        chat_room2 = ChatRoom()
+        chat_room2.participants = [users[1], users[2]]
+        chat_rooms.append(chat_room2)
+
+        for room in chat_rooms:
+            session.add(room)
+        session.commit()
+
+        # Add some test messages
+        messages = [
+            Message(
+                chat_room_id=chat_room1.id,
+                sender_id=users[0].id,
+                content="Hey, how are you?",
+                status=MessageStatus.READ
+            ),
+            Message(
+                chat_room_id=chat_room1.id,
+                sender_id=users[1].id,
+                content="I'm good, thanks! How about you?",
+                status=MessageStatus.READ
+            ),
+            Message(
+                chat_room_id=chat_room2.id,
+                sender_id=users[1].id,
+                content="Hello there!",
+                status=MessageStatus.SENT
+            )
+        ]
+
+        session.add_all(messages)
+        session.commit()
         
         print("Test data created successfully!")
         print(f"Created {len(users)} users")
         print(f"Created {len(posts)} posts")
         print(f"Created {len(all_topics)} topics")
+        print(f"Created {len(chat_rooms)} chat rooms")
+        print(f"Created {len(messages)} messages")
 
 if __name__ == "__main__":
     create_test_data() 

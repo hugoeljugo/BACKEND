@@ -3,12 +3,12 @@ from typing import Annotated, Dict, List
 import json
 from datetime import datetime, timezone
 from sqlalchemy import func
-from sqlmodel import select
+from sqlmodel import select, SQLModel
 import logging
 import os
 from uuid import uuid4
 
-from models import User, ChatRoom, Message, ChatRoomParticipant, MessageStatus
+from models import User, ChatRoom, Message, ChatRoomParticipant, MessageStatus, UserPublic
 from dependencies import get_current_active_user, SessionDep
 from core.config import get_settings
 from models.response import BasicFileResponse
@@ -16,6 +16,13 @@ from models.response import BasicFileResponse
 router = APIRouter()
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+
+class ChatRoomResponse(SQLModel):
+    id: int
+    created_at: datetime
+    last_message_at: datetime
+    participants: List[UserPublic]
 
 class ConnectionManager:
     def __init__(self):
@@ -119,7 +126,7 @@ async def create_chat_room(
     
     return chat_room
 
-@router.get("/rooms")
+@router.get("/rooms", response_model=List[ChatRoomResponse])
 async def get_chat_rooms(
     session: SessionDep,
     current_user: Annotated[User, Depends(get_current_active_user)],
@@ -133,7 +140,37 @@ async def get_chat_rooms(
     )
     return session.exec(query).all()
 
-@router.get("/rooms/{room_id}/messages")
+@router.post("/messages", response_model=Message)
+async def send_message(session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)], message: Message):
+    """Send a message to a chat room"""
+    chat_room = session.get(ChatRoom, message.chat_room_id)
+    if not chat_room:
+        raise HTTPException(status_code=404, detail="Chat room not found")
+    
+    if current_user.id not in [p.id for p in chat_room.participants]:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    
+    # Save message
+    session.add(message)
+    chat_room.last_message_at = datetime.now(timezone.utc)
+    session.commit()
+    
+    # Send to all participants
+    for participant in chat_room.participants:
+        if participant.id != current_user.id:
+            await manager.send_message({
+                "type": "message",
+                "message_id": message.id,
+                "chat_room_id": message.chat_room_id,
+                "sender_id": message.sender_id,
+                "content": message.content,
+                "file_url": message.file_url,
+                "timestamp": message.created_at.isoformat()
+            }, participant.id)
+    
+    return message
+
+@router.get("/rooms/{room_id}/messages", response_model=List[Message])
 async def get_messages(
     room_id: int,
     session: SessionDep,
@@ -186,3 +223,5 @@ async def upload_file(
         file_object.write(await file.read())
     
     return BasicFileResponse(message="File uploaded successfully", file_name=file_name) 
+
+

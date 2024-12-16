@@ -80,7 +80,7 @@ async def like_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    existing_link = current_user.liked_posts.filter(PostUserLink.post_id == post.id).first()
+    existing_link = [like for like in current_user.likes if like.id == post.id]
 
     if existing_link:
         raise HTTPException(status_code=400, detail="Already liked this post")
@@ -98,7 +98,7 @@ async def like_post(
     post.user.total_likes_received += 1
     
     # Add records to database
-    current_user.liked_posts.append(post)
+    current_user.likes.append(post)
     post.liked_by.append(current_user)
     session.add_all([current_user, post, interaction])
     session.commit()
@@ -120,13 +120,12 @@ async def unlike_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    existing_link = current_user.liked_posts.filter(PostUserLink.post_id == post.id).first()
+    existing_link = [like for like in current_user.likes if like.id == post.id]
 
     if not existing_link:
         raise HTTPException(status_code=400, detail="Not liked this post")
 
-    current_user.liked_posts.remove(post)
-    post.liked_by.remove(current_user)
+    current_user.likes.remove(post)
     session.add_all([current_user, post])
     session.commit()
     return JSONResponse({"message": "Post unliked successfully"}) 
