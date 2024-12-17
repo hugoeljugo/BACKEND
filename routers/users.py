@@ -12,7 +12,7 @@ from models import (
     BasicResponse, PostPublic, Post
 )
 from dependencies import (
-    SessionDep, get_current_active_user, get_user, add_liked_status
+    SessionDep, get_current_active_user, get_user, add_liked_status, add_followed_status
 )
 from services.email import generate_verification_code, send_verification_email
 from auth.security import get_password_hash
@@ -114,12 +114,12 @@ async def delete_user_me(
 
 @router.get("/{username}", response_model=UserPublic)
 @cache_response(settings.CACHE_EXPIRE_TIME)
-async def get_user_by_username(username: str, session: SessionDep):
+async def get_user_by_username(username: str, session: SessionDep, current_user: Annotated[User, Depends(get_current_active_user)]):
     """Get public profile information for any user"""
     user = get_user(username, session)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return add_followed_status(user, current_user)
 
 @router.get("/id/{user_id}", response_model=UserPublic)
 @cache_response(settings.CACHE_EXPIRE_TIME)

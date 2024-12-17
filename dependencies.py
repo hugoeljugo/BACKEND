@@ -167,3 +167,12 @@ def add_liked_status(post: Post, current_user: User | None) -> PostPublic:
     )
     post_dict["user"] = UserPublic.model_validate(post.user)
     return PostPublic(**post_dict)
+
+def add_followed_status(user: User, current_user: User) -> UserPublic:
+    """Helper function to convert User to UserPublic with followed status"""
+    user_dict = user.model_dump()
+    user_dict["is_followed_by_user"] = (
+        current_user.id in [user.id for user in user.followers]
+        if current_user else None
+    )
+    return UserPublic(**user_dict)

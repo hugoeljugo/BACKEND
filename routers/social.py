@@ -25,7 +25,7 @@ async def follow_user(
         raise HTTPException(status_code=404, detail="User not found")
 
 
-    existing_link = current_user.following.filter(UserFollow.followed_id == followed.id).first()
+    existing_link = [follow for follow in current_user.following if follow.id == followed.id]
 
     if existing_link:
         raise HTTPException(status_code=400, detail="Already following this user")
@@ -53,7 +53,7 @@ async def unfollow_user(
         raise HTTPException(status_code=404, detail="User not found")
 
 
-    existing_link = current_user.following.filter(UserFollow.followed_id == unfollowed.id).first()
+    existing_link = [follow for follow in current_user.following if follow.id == unfollowed.id]
 
     if not existing_link:
         raise HTTPException(status_code=400, detail="Not following this user")
@@ -63,7 +63,6 @@ async def unfollow_user(
     unfollowed.follower_count -= 1
 
     current_user.following.remove(unfollowed)
-    unfollowed.followers.remove(current_user)
 
     session.add_all([current_user, unfollowed])
     session.commit()

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from .topic import UserTopic
 from typing import List
 from .chat import ChatRoom, ChatRoomParticipant
+from typing import Optional
 
 ROOT_DIR = Path(__file__).parent.parent
 PFP = ROOT_DIR / 'default_pfp.png'
@@ -97,7 +98,7 @@ class UserPublic(UserBase):
     post_count: int
     follower_count: int
     following_count: int
-
+    is_followed_by_user: Optional[bool] = None # Only used in response models
 
 class UserCreate(UserBase):
     password: str
