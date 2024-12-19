@@ -2,3 +2,4 @@
 *.venv
 *.yml
 /uploaded_files/*
+*.pyc
