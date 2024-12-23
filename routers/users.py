@@ -85,7 +85,7 @@ async def get_users_me(
 ) -> UserPublic:
     """Get current user's profile information"""
     user = get_user(current_user.username, session)
-    return user
+    return user.model_dump()
 
 @router.patch("/me", response_model=UserPublic)
 async def update_own_user(
