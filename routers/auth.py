@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import logging
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     session: SessionDep,
+    permanent: bool = Form(default=False),
 ):
     """Login endpoint to obtain access token"""
     user = authenticate_user(form_data.username, form_data.password, session)
@@ -32,11 +33,19 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, 
-        expires_delta=access_token_expires
-    )
+    if permanent:
+        access_token = create_access_token(
+            data={"sub": user.username},
+            expires_delta=None  # No expiration
+        )
+        max_age = None  # Cookie never expires
+    else:
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username}, 
+            expires_delta=access_token_expires
+        )
+        max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     
     response = JSONResponse({"message": "Login successful"})
     response.set_cookie(
@@ -45,7 +54,7 @@ async def login_for_access_token(
         httponly=True,
         secure=True,
         samesite="Lax",
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        max_age=max_age,
     )
     return response
 
@@ -62,7 +71,7 @@ async def enable_2fa(
     current_user: Annotated[User, Depends(get_current_active_user)]
 ):
     """Enable 2FA for the current user"""
-    if current_user.two_factor_enabled:
+    if (current_user.two_factor_enabled):
         raise HTTPException(status_code=400, detail="2FA already enabled")
 
     secret = TwoFactorService.generate_secret()
@@ -139,4 +148,4 @@ async def resend_verification(
         session.commit()
         return JSONResponse({"message": "Verification email sent"})
     else:
-        raise HTTPException(status_code=500, detail="Failed to send verification email") 
+        raise HTTPException(status_code=500, detail="Failed to send verification email")
