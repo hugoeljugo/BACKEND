@@ -12,9 +12,9 @@ class InteractionType(str, Enum):
 
 class Interaction(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id", index=True)
-    post_id: int = Field(foreign_key="post.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True, ondelete="CASCADE")
+    post_id: int = Field(foreign_key="post.id", index=True, ondelete="CASCADE")
     interaction_type: InteractionType
     timestamp: datetime = Field(default=datetime.now(timezone.utc))
     duration: float | None = Field(default=None)  # For view duration tracking
-    source: str | None = Field(default=None)  # feed, profile, search, etc. 
+    source: str | None = Field(default=None)  # feed, profile, search, etc.

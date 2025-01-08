@@ -1,12 +1,75 @@
+import random
 from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, SQLModel, create_engine, select
 from models import User, Post, PostUserLink, UserFollow, Topic, PostTopic, UserTopic, Interaction, InteractionType, ChatRoom, Message, MessageStatus
 from core.config import get_settings
 from auth.security import get_password_hash
-import random
+
+# Data pools
+FIRST_NAMES = [
+    "Juan", "María", "Alberto", "Lucía", "Pedro", "Ana", "Carlos", "Sofia",
+    "John", "Emma", "Michael", "Sarah", "David", "Isabella", "James", "Laura"
+]
+
+LAST_NAMES = [
+    "Domínguez", "García", "Rodríguez", "López", "Martínez", "González",
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis"
+]
+
+PROFILE_PICTURES = [
+    "default1.jpg", "default2.jpg", "default3.jpg", "default4.jpg",
+    "avatar1.png", "avatar2.png", "avatar3.png", "avatar4.png"
+]
+
+CONVERSATION_STARTERS = [
+    "Hey, how are you?",
+    "Did you watch the last episode of that show?",
+    "I saw the new Marvel movie, it's amazing!",
+    "When are we playing Valorant?",
+    "Have you started the new project?",
+    "Anyone up for coffee later?",
+    "Can't believe what happened in the game yesterday!",
+    "Did you finish the assignment?",
+    "What are your plans for the weekend?"
+]
+
+CONVERSATION_REPLIES = [
+    "I'm good, thanks! How about you?",
+    "Yes! It was incredible!",
+    "Not yet, but I heard it's great",
+    "I'm free tonight if you want to play",
+    "Still working on it, need help?",
+    "Sure, I'm free after 3",
+    "I know right? Crazy match!",
+    "Almost done, just need to review",
+    "Nothing planned yet, any suggestions?"
+]
+
+POST_CONTENTS = [
+    "Just finished my first project with Vue.js! 🚀",
+    "Anyone else loving the new TypeScript features? #coding",
+    "Beautiful day for a coffee and some coding ☕️",
+    "Finally solved that bug that was driving me crazy! 🐛",
+    "Learning FastAPI has been an amazing journey",
+    "Who's up for a game of Valorant tonight? 🎮",
+    "Just deployed my first full-stack application! 🎉",
+    "Does anyone have good resources for learning Docker?",
+    "The new VS Code update is amazing! 💻"
+]
 
 settings = get_settings()
 engine = create_engine(settings.DATABASE_URL, echo=True)
+
+def random_date(start_date, end_date):
+    time_between = end_date - start_date
+    days_between = time_between.days
+    random_number_of_days = random.randrange(days_between)
+    random_time = timedelta(
+        hours=random.randint(0, 23),
+        minutes=random.randint(0, 59),
+        seconds=random.randint(0, 59)
+    )
+    return start_date + timedelta(days=random_number_of_days) + random_time
 
 def create_test_data():
     SQLModel.metadata.create_all(engine)
@@ -44,21 +107,25 @@ def create_test_data():
         
         session.commit()  # Commit subtopics
 
-        # Create test users
+        # Create users with random names and profile pictures
         users = []
-        for i in range(1, 6):
+        for i in range(10):
+            first_name = random.choice(FIRST_NAMES)
+            last_name = random.choice(LAST_NAMES)
+            username = f"{first_name.lower()}{random.randint(1, 999)}"
+            
             user = User(
-                username=f"test_user{i}",
-                full_name=f"Test User {i}",
-                email=f"test{i}@example.com",
+                username=username,
+                email=f"{username}@example.com",
+                full_name=f"{first_name} {last_name}",
+                pfp=random.choice(PROFILE_PICTURES),
                 password=get_password_hash("password123"),
-                email_verified=True,
-                is_admin=True if i == 1 else False
+                email_verified=random.choice([True, False])
             )
             users.append(user)
-            session.add(user)
         
-        session.commit()  # Commit users
+        session.add_all(users)
+        session.commit()
         
         # Assign random topics of interest to users
         for user in users:
@@ -70,25 +137,23 @@ def create_test_data():
         
         session.commit()  # Commit user topics
         
-        # Create some posts for each user
+        # Create posts with random content and dates
         posts = []
-        for user in users:
-            for j in range(3):  # 3 posts per user
-                post = Post(
-                    post_body=f"This is test post {j+1} from {user.username}",
-                    user_id=user.id,
-                    date=datetime.now(timezone.utc) - timedelta(days=random.randint(0, 30)),
-                    view_count=random.randint(10, 100),
-                    like_count=random.randint(5, 50),
-                    reply_count=random.randint(0, 10),
-                    share_count=random.randint(0, 5),
-                    engagement_score=random.uniform(0.1, 1.0)
-                )
-                posts.append(post)
-                session.add(post)
-                user.post_count += 1
+        start_date = datetime(2023, 1, 1)
+        end_date = datetime.now()
+        for i in range(50):  # Create 50 posts
+            user = random.choice(users)
+            post = Post(
+                user_id=user.id,
+                post_body=random.choice(POST_CONTENTS),
+                date=random_date(start_date, end_date)
+            )
+            posts.append(post)
+            user.post_count += 1  # Increment the user's post count
+            session.add(user)  # Refresh the user object
         
-        session.commit()  # Commit posts before creating post-topic relationships
+        session.add_all(posts)
+        session.commit()
         
         # Now create post-topic relationships
         for post in posts:
@@ -155,44 +220,34 @@ def create_test_data():
         
         session.commit()  # Final commit for engagement rates
 
-        # Create chat rooms
+        # Create chat rooms and messages
         chat_rooms = []
-        # Create a chat room between user1 and user2
-        chat_room1 = ChatRoom()
-        chat_room1.participants = [users[0], users[1]]
-        chat_rooms.append(chat_room1)
-
-        # Create a chat room between user2 and user3
-        chat_room2 = ChatRoom()
-        chat_room2.participants = [users[1], users[2]]
-        chat_rooms.append(chat_room2)
-
-        for room in chat_rooms:
-            session.add(room)
+        for _ in range(5):
+            participants = random.sample(users, 2)
+            chat_room = ChatRoom()
+            chat_room.participants = participants
+            chat_rooms.append(chat_room)
+        session.add_all(chat_rooms)
         session.commit()
 
-        # Add some test messages
-        messages = [
-            Message(
-                chat_room_id=chat_room1.id,
-                sender_id=users[0].id,
-                content="Hey, how are you?",
-                status=MessageStatus.READ
-            ),
-            Message(
-                chat_room_id=chat_room1.id,
-                sender_id=users[1].id,
-                content="I'm good, thanks! How about you?",
-                status=MessageStatus.READ
-            ),
-            Message(
-                chat_room_id=chat_room2.id,
-                sender_id=users[1].id,
-                content="Hello there!",
-                status=MessageStatus.SENT
-            )
-        ]
-
+        # Add messages with random content and dates
+        messages = []
+        for room in chat_rooms:
+            num_messages = random.randint(3, 10)
+            for _ in range(num_messages):
+                is_starter = random.choice([True, False])
+                content = random.choice(CONVERSATION_STARTERS if is_starter else CONVERSATION_REPLIES)
+                sender = random.choice(room.participants)
+                
+                message = Message(
+                    chat_room_id=room.id,
+                    sender_id=sender.id,
+                    content=content,
+                    date=random_date(start_date, end_date),
+                    status=random.choice(list(MessageStatus))
+                )
+                messages.append(message)
+                
         session.add_all(messages)
         session.commit()
         
@@ -204,4 +259,4 @@ def create_test_data():
         print(f"Created {len(messages)} messages")
 
 if __name__ == "__main__":
-    create_test_data() 
+    create_test_data()

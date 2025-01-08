@@ -6,13 +6,13 @@ if TYPE_CHECKING:
     from .user import User
 
 class PostTopic(SQLModel, table=True):
-    post_id: int = Field(foreign_key="post.id", primary_key=True)
-    topic_id: int = Field(foreign_key="topic.id", primary_key=True)
+    post_id: int = Field(foreign_key="post.id", primary_key=True, ondelete="CASCADE")
+    topic_id: int = Field(foreign_key="topic.id", primary_key=True, ondelete="CASCADE")
     confidence: float = Field(default=1.0)
 
 class UserTopic(SQLModel, table=True):
-    user_id: int = Field(foreign_key="user.id", primary_key=True)
-    topic_id: int = Field(foreign_key="topic.id", primary_key=True)
+    user_id: int = Field(foreign_key="user.id", primary_key=True, ondelete="CASCADE")
+    topic_id: int = Field(foreign_key="topic.id", primary_key=True, ondelete="CASCADE")
 
 class Topic(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)

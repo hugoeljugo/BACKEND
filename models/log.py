@@ -12,4 +12,4 @@ class Log(SQLModel, table=True):
         default=None,
         sa_column=Column(JSON)
     )
-    user_id: Optional[int] = Field(default=None, foreign_key="user.id") 
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", ondelete="CASCADE")

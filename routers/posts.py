@@ -74,7 +74,7 @@ async def get_posts_feed(
         following_ids = [u.id for u in current_user.following]
         
         # Build the main query with ranking factors
-        base_query = select(Post).join(User).where(
+        base_query = select(Post).join(User).join(Post.topics).where(
             Post.parent_id == None  # Only get top-level posts, excluding replies
         ).order_by(
             (
@@ -107,13 +107,13 @@ async def get_posts_feed(
                 # Posts newer than 24h get higher scores, linear decay
                 case(
                     (cast(func.extract('epoch', func.now() - Post.date), Float) / 86400 > 1, 0),
-                    else_=1.0 - cast(func.extract('epoch', func.now() - Post.date), Float) / 86400
+                    else_=func.greatest(1.0 - cast(func.extract('epoch', func.now() - Post.date), Float) / 86400, 0)
                 ) * 0.3 +
                 
                 # Topic relevance (10% weight)
                 # Bonus for posts matching user's interested topics
                 case(
-                    (Post.topics.any(Topic.id.in_(user_topic_ids)), 0.1),
+                    (Topic.id.in_(user_topic_ids), 0.1),
                     else_=0
                 ) +
                 
@@ -133,6 +133,7 @@ async def get_posts_feed(
                         .where(PostUserLink.user_id == current_user.id)
                         .group_by(Post.user_id)
                         .having(func.count() > 0)
+                        .alias('subquery')
                     ), 0.05),
                     else_=0
                 )
