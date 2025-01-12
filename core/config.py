@@ -5,22 +5,68 @@ from pathlib import Path
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "MeowApp API"
+    APP_NAME: str = "WhiskrNet API"
     APP_VERSION: str = "1.0.0"
     APP_DESCRIPTION: str = """
-    Social media API for cat lovers. 
-    
-    ## Features
-    * User authentication and authorization
-    * Post creation and management
-    * Like and follow functionality
-    * Profile picture management
-    * Real-time chat using WebSockets
-    
-    ## Rate Limits
-    * Login: 3 attempts per minute
-    * Posts: 5 posts per minute
-    * Likes: 10 like operations per minute
+    🐱 WhiskrNet 🐱
+
+    ## ✨ Core Features
+
+    ### 🔐 Authentication & Security
+    * Email-based registration and login
+    * JWT token authentication
+    * Rate-limited login attempts (3/minute)
+    * Password hashing with bcrypt
+    * Session management
+
+    ### 👤 User Management
+    * Customizable user profiles
+    * Profile picture upload and management
+    * Email verification system
+    * Follow/unfollow functionality
+    * User activity tracking
+
+    ### 📝 Posts System
+    * Create and edit text posts
+    * Like/unlike posts (rate limit: 10/minute)
+    * Post creation limits (5/minute)
+    * View post engagement metrics
+    * Post visibility controls
+
+    ### 🖼️ Media Management
+    * Image upload support
+    * Supported formats: JPG, JPEG, PNG, WebP
+    * Automatic image optimization
+    * Maximum file size: 10MB
+    * Secure file storage
+
+    ### 💬 Real-time Features
+    * WebSocket-based chat system
+    * Online status indicators
+    * Real-time post updates
+    * Message read receipts
+
+    ### 🛠️ Technical Features
+    * Redis caching system
+    * Rate limiting
+    * API documentation (OpenAPI/Swagger)
+    * Error logging and monitoring
+    * Database optimization
+
+    ## 🔄 Rate Limits
+    | Feature           | Limit            |
+    |------------------|------------------|
+    | Login attempts   | 3 per minute     |
+    | Post creation    | 5 per minute     |
+    | Like operations  | 10 per minute    |
+    | File uploads     | 10MB per file    |
+
+    ## 🚧 Coming Soon
+    * Advanced notification system
+    * Post comments and replies
+    * Content moderation tools
+    * Enhanced search functionality
+    * User analytics dashboard
     """
     DOCS_URL: str = "/docs"
     REDOC_URL: str = "/redoc"
