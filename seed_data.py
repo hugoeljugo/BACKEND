@@ -17,7 +17,7 @@ LAST_NAMES = [
 ]
 
 PROFILE_PICTURES = [
-    "default_pfp.jpg"
+    "default_pfp.png"
 ]
 
 CONVERSATION_STARTERS = [
